@@ -1,47 +1,68 @@
-# 🏥 I-Way Digital Twin
+# I-Way Digital Twin
 
-> **Simulator for an Insurance Backend** — A FastAPI-powered digital twin that mimics the I-Way insurance platform, providing realistic API responses for Adherent (member) and Prestataire (healthcare provider) personas.
+> **Hybrid AI Chatbot & Agent Platform** for I-Way Solutions (I-Sante project) — a mock-first health insurance backend with AI-powered conversational assistant, semantic RAG search, and a Streamlit chat interface.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Agent-orange)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## ✨ Features
+## Overview
 
-- **Persona-based simulation** — Switch between Adherent (Nadia) and Prestataire (Dr. Amine) via a single header
-- **In-memory mock database** — Pre-loaded with realistic insurance data (dossiers, beneficiaries, prestations, remboursements)
-- **Knowledge base endpoint** — RAG-ready knowledge base with business rules for vector indexing
-- **Claims management** — Create and track support tickets (réclamations)
-- **Human escalation** — Simulate escalation to a live agent with queue info
-- **RSA key generation** — Auto-generated 2048-bit key pair on startup
-- **Latency simulation** — Toggle via environment variable to test slow-network scenarios
-- **Full test suite** — 15+ async tests with `pytest` + `httpx`
+This project implements a **mock-first** approach to building an AI-powered insurance assistant. Since the real Java Spring Boot backend is in development, this platform provides:
 
-## 🛠️ Tech Stack
+1. **Mock API Server** — FastAPI server with RS256 JWT auth, simulating the full I-Way insurance backend
+2. **AI Agent** — LangGraph stateful agent powered by Gemini 2.5 Flash (or local Ollama), with tool-calling capabilities
+3. **RAG Engine** — FAISS vector store with sentence-transformers for semantic search over insurance rules
+4. **Chat UI** — Streamlit-based conversational interface for testing the AI assistant
 
-| Component      | Technology                     |
-| -------------- | ------------------------------ |
-| Framework      | FastAPI                        |
-| Server         | Uvicorn                        |
-| Validation     | Pydantic v2                    |
-| Crypto         | `cryptography` (RSA 2048-bit)  |
-| Testing        | pytest + httpx (async)         |
-| Config         | python-dotenv                  |
+## Architecture
 
-## 🚀 Quick Start
+```
+                        +------------------+
+                        |   Streamlit UI   |   (chat_ui.py)
+                        +--------+---------+
+                                 |
+                        +--------+---------+
+                        |  LangGraph Agent |   (agent.py)
+                        +--------+---------+
+                                 |
+               +-----------------+-----------------+
+               |                 |                 |
+      +--------+------+  +------+-------+  +------+--------+
+      | API Tool      |  | RAG Tool     |  | Escalation    |
+      | (dossiers)    |  | (FAISS)      |  | Tool          |
+      +--------+------+  +------+-------+  +------+--------+
+               |                 |                 |
+      +--------+-----------------+-----------------+--------+
+      |              Mock API Server (FastAPI)               |
+      |                    main.py                           |
+      +-----------------------------------------------------+
+```
 
-### 1. Clone the repository
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Backend | Python 3.11+, FastAPI, Uvicorn |
+| Authentication | RS256 JWT (PyJWT + cryptography) |
+| AI Orchestration | LangGraph, LangChain |
+| LLM (Cloud) | Gemini 2.5 Flash via langchain-google-genai |
+| LLM (Local) | Qwen 3.5 9B via Ollama + langchain-openai |
+| Vector Search | FAISS + sentence-transformers (all-MiniLM-L6-v2) |
+| Chat Interface | Streamlit |
+| Testing | pytest + httpx (async) |
+| Config | python-dotenv |
+
+## Quick Start
+
+### 1. Clone and setup
 
 ```bash
 git clone https://github.com/aliaouidet/iway-digital-twin.git
 cd iway-digital-twin
-```
-
-### 2. Create a virtual environment
-
-```bash
 python -m venv venv
 
 # Windows
@@ -49,22 +70,23 @@ python -m venv venv
 
 # macOS / Linux
 source venv/bin/activate
-```
 
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env with your values
 ```
 
-### 5. Run the server
+Edit `.env` and set your `GOOGLE_API_KEY` (get one at [Google AI Studio](https://aistudio.google.com/apikey)):
+
+```env
+GOOGLE_API_KEY=your_actual_api_key_here
+```
+
+### 3. Run the Mock Server
 
 ```bash
 python main.py
@@ -72,52 +94,150 @@ python main.py
 
 The API will be live at **http://localhost:8000** with interactive docs at **http://localhost:8000/docs**.
 
-## 📡 API Endpoints
+### 4. Run the Chat UI
 
-| Method | Endpoint                         | Description                          | Tag         |
-| ------ | -------------------------------- | ------------------------------------ | ----------- |
-| GET    | `/`                              | System status & available personas   | System      |
-| GET    | `/api/v1/me`                     | Current user profile                 | Auth        |
-| GET    | `/api/v1/knowledge-base`         | Knowledge base for RAG indexing      | RAG Source  |
-| GET    | `/api/v1/adherent/dossiers`      | Medical/admin dossiers               | Métier      |
-| GET    | `/api/v1/adherent/beneficiaires` | Covered family members               | Métier      |
-| GET    | `/api/v1/prestations`            | Medical acts history                 | Métier      |
-| GET    | `/api/v1/remboursements`         | Reimbursement history                | Métier      |
-| GET    | `/api/v1/reclamations`           | Support ticket history               | Support     |
-| POST   | `/api/v1/reclamations`           | Create a new support ticket          | Support     |
-| POST   | `/api/v1/support/escalade`       | Escalate to human agent              | Support     |
-
-## 👤 Available Personas
-
-Switch personas using the `X-User-Id` header:
-
-| Header Value   | Role         | Description                           |
-| -------------- | ------------ | ------------------------------------- |
-| `NADIA_2024`   | Adherent     | Insurance member with full data       |
-| `DOC_AMINE`    | Prestataire  | Healthcare provider (Cardiologie)     |
+In a second terminal:
 
 ```bash
-# As Nadia (default — no header needed)
-curl http://localhost:8000/api/v1/me
-
-# As Dr. Amine
-curl -H "X-User-Id: DOC_AMINE" http://localhost:8000/api/v1/me
+streamlit run chat_ui.py
 ```
 
-## 🧪 Running Tests
+Open **http://localhost:8501**, log in as Nadia or Dr. Amine, and start chatting.
+
+### 5. Run the Agent (CLI)
+
+Alternatively, test the agent in the terminal:
 
 ```bash
-pip install pytest httpx anyio
+python agent.py
+```
+
+## Project Structure
+
+```
+iway-digital-twin/
+├── main.py              # FastAPI mock server (JWT auth, 12 endpoints, mock DB)
+├── agent.py             # LangGraph stateful agent (Gemini/Ollama toggle)
+├── bot_tools.py         # LangChain tools (API calls, RAG search, escalation)
+├── rag_engine.py        # FAISS vector store + sentence-transformers
+├── chat_ui.py           # Streamlit chat interface
+├── test_main.py         # 22 tests for the mock server
+├── test_bot_tools.py    # 24 tests for tools, agent, and integration
+├── requirements.txt     # Python dependencies
+├── .env.example         # Environment variable template
+├── .gitignore           # Git ignore rules
+└── LICENSE              # MIT License
+```
+
+## API Endpoints
+
+All `/api/v1/*` endpoints require a valid JWT Bearer token obtained from `/auth/login`.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/` | System status and available personas |
+| POST | `/auth/login` | Authenticate and receive JWT token |
+| GET | `/auth/public-key` | RSA public key (PEM format) |
+| GET | `/api/v1/me` | Current user profile |
+| GET | `/api/v1/knowledge-base` | Knowledge base entries (12 items) |
+| GET | `/api/v1/adherent/dossiers` | Medical/admin dossiers |
+| GET | `/api/v1/adherent/beneficiaires` | Covered family members |
+| GET | `/api/v1/prestations` | Medical acts history |
+| GET | `/api/v1/remboursements` | Reimbursement history |
+| GET | `/api/v1/reclamations` | Support ticket history |
+| POST | `/api/v1/reclamations` | Create a new support ticket |
+| POST | `/api/v1/support/escalade` | Escalate to human agent |
+| GET | `/api/v1/dashboard/tickets` | Escalation tickets (dashboard) |
+
+## Test Personas
+
+| Profile | Matricule | Password | Role |
+|---|---|---|---|
+| Nadia Mansour | `12345` | `pass` | Adherent (insurance member) |
+| Dr. Amine Zaid | `99999` | `med` | Prestataire (healthcare provider) |
+
+```bash
+# Example: login as Nadia
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"matricule": "12345", "password": "pass"}'
+```
+
+## AI Agent
+
+The LangGraph agent (`agent.py`) orchestrates three tools:
+
+| Tool | Purpose | Mechanism |
+|---|---|---|
+| `get_personal_dossiers` | Fetch user's medical files | `GET /api/v1/adherent/dossiers` with Bearer token |
+| `search_knowledge_base` | Insurance rules lookup | FAISS semantic search (12 KB entries) |
+| `escalate_to_human` | Transfer to human agent | `POST /api/v1/support/escalade` |
+
+### LLM Toggle
+
+Switch between cloud and local LLM via environment variable:
+
+```env
+# Cloud (default) — requires GOOGLE_API_KEY
+USE_LOCAL_LLM=false
+
+# Local — requires Ollama running with qwen3.5:9b
+USE_LOCAL_LLM=true
+```
+
+For local mode, install and run [Ollama](https://ollama.com):
+
+```bash
+ollama pull qwen3.5:9b
+ollama serve
+```
+
+## RAG Engine
+
+The knowledge base uses **FAISS** with **sentence-transformers** (all-MiniLM-L6-v2) for semantic vector search. The system indexes 12 insurance policy entries covering:
+
+- Dental coverage and ceilings
+- Birth premium
+- Reimbursement timelines
+- Hospitalization coverage
+- Optical care
+- Pharmacy and medications
+- Chronic illness protocols
+- Maternity leave
+- Emergency procedures
+- Provider conventions
+
+The RAG architecture is designed for incremental upgrades:
+
+| Level | Implementation | Status |
+|---|---|---|
+| Level 2 | FAISS + sentence-transformers | Current |
+| Level 3 | + BM25 hybrid search | Ready to add |
+| Level 4 | ChromaDB + PDF loader + reranker | Planned |
+
+## Running Tests
+
+```bash
+# Run all tests (46 total)
+pytest test_main.py test_bot_tools.py -v
+
+# Run only server tests (22)
 pytest test_main.py -v
+
+# Run only AI/tool tests (24)
+pytest test_bot_tools.py -v
 ```
 
-## ⚙️ Environment Variables
+## Environment Variables
 
-| Variable           | Default       | Description                              |
-| ------------------ | ------------- | ---------------------------------------- |
-| `APP_ENV`          | `development` | Application environment                  |
-| `APP_NAME`         | —             | Application display name                 |
-| `API_VERSION`      | `v1`          | API version prefix                       |
-| `SECRET_KEY`       | —             | Secret for simulated token generation    |
-| `SIMULATE_LATENCY` | `false`       | Toggle network latency simulation        |
+| Variable | Default | Description |
+|---|---|---|
+| `USE_LOCAL_LLM` | `false` | Toggle between Cloud (Gemini) and Local (Ollama) |
+| `GOOGLE_API_KEY` | — | Google AI API key (required for cloud mode) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama server URL (local mode) |
+| `OLLAMA_MODEL` | `qwen3.5:9b` | Ollama model name (local mode) |
+| `MOCK_SERVER_URL` | `http://localhost:8000` | Mock server base URL |
 
+## License
+
+[MIT](LICENSE)

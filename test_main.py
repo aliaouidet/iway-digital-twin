@@ -1,10 +1,12 @@
 """
-Test suite for the I-Way Digital Twin API.
+Test suite for the I-Way Digital Twin API (with RS256 JWT Auth).
 Run with:  .\venv\Scripts\pytest.exe test_main.py -v
 """
 import pytest
 from httpx import AsyncClient, ASGITransport
-from main import app, MOCK_DB
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from main import app, MOCK_DB, state
 
 
 # ── Fixtures ──────────────────────────────────────────────────
@@ -12,6 +14,19 @@ from main import app, MOCK_DB
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _init_rsa_keys():
+    """Generate RSA keys before each test (lifespan doesn't fire under ASGITransport)."""
+    state.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    state.public_key_pem = state.private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    yield
+    state.private_key = None
+    state.public_key_pem = None
 
 
 @pytest.fixture
@@ -22,11 +37,23 @@ async def client():
         yield ac
 
 
+async def login_as(client, matricule: str, password: str) -> str:
+    """Helper: logs in and returns the Bearer token."""
+    resp = await client.post("/auth/login", json={"matricule": matricule, "password": password})
+    assert resp.status_code == 200, f"Login failed: {resp.text}"
+    return resp.json()["access_token"]
+
+
+def auth_header(token: str) -> dict:
+    """Helper: returns Authorization header dict."""
+    return {"Authorization": f"Bearer {token}"}
+
+
 # ── 1. System / Root ─────────────────────────────────────────
 
 @pytest.mark.anyio
 async def test_root_returns_status(client):
-    """GET / should return system info and status."""
+    """GET / should return system info and status (public)."""
     resp = await client.get("/")
     assert resp.status_code == 200
     data = resp.json()
@@ -35,41 +62,93 @@ async def test_root_returns_status(client):
     assert data["docs"] == "/docs"
 
 
-# ── 2. Auth – GET /api/v1/me ──────────────────────────────────
+# ── 2. Auth – Login ──────────────────────────────────────────
 
 @pytest.mark.anyio
-async def test_me_default_persona(client):
-    """Without X-User-Id header, defaults to NADIA_2024."""
+async def test_login_nadia(client):
+    """POST /auth/login with Nadia's credentials returns a JWT."""
+    resp = await client.post("/auth/login", json={"matricule": "12345", "password": "pass"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["user"]["matricule"] == "12345"
+    assert data["user"]["role"] == "Adherent"
+
+
+@pytest.mark.anyio
+async def test_login_dr_amine(client):
+    """POST /auth/login with Dr. Amine's credentials returns a JWT."""
+    resp = await client.post("/auth/login", json={"matricule": "99999", "password": "med"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user"]["matricule"] == "99999"
+    assert data["user"]["role"] == "Prestataire"
+
+
+@pytest.mark.anyio
+async def test_login_wrong_password(client):
+    """Wrong password should return 401."""
+    resp = await client.post("/auth/login", json={"matricule": "12345", "password": "wrong"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_login_unknown_user(client):
+    """Unknown matricule should return 401."""
+    resp = await client.post("/auth/login", json={"matricule": "00000", "password": "x"})
+    assert resp.status_code == 401
+
+
+# ── 3. Auth – Public Key ─────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_public_key(client):
+    """GET /auth/public-key should return the RSA public key PEM."""
+    resp = await client.get("/auth/public-key")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["algorithm"] == "RS256"
+    assert "BEGIN PUBLIC KEY" in data["public_key"]
+
+
+# ── 4. Protected – /api/v1/me ────────────────────────────────
+
+@pytest.mark.anyio
+async def test_me_requires_auth(client):
+    """GET /api/v1/me without token should return 403."""
     resp = await client.get("/api/v1/me")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["matricule"] == "NADIA_2024"
-    assert data["role"] == "Adherent"
-
-
-@pytest.mark.anyio
-async def test_me_with_valid_header(client):
-    """X-User-Id: DOC_AMINE should return the Prestataire profile."""
-    resp = await client.get("/api/v1/me", headers={"X-User-Id": "DOC_AMINE"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["matricule"] == "DOC_AMINE"
-    assert data["role"] == "Prestataire"
-    assert data["specialite"] == "Cardiologie"
-
-
-@pytest.mark.anyio
-async def test_me_unknown_user_returns_403(client):
-    """An unknown X-User-Id must be rejected with 403."""
-    resp = await client.get("/api/v1/me", headers={"X-User-Id": "UNKNOWN"})
     assert resp.status_code == 403
 
 
-# ── 3. Knowledge Base ────────────────────────────────────────
+@pytest.mark.anyio
+async def test_me_nadia(client):
+    """GET /api/v1/me with Nadia's token returns her profile (no password)."""
+    token = await login_as(client, "12345", "pass")
+    resp = await client.get("/api/v1/me", headers=auth_header(token))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["matricule"] == "12345"
+    assert data["role"] == "Adherent"
+    assert "password" not in data
+
+
+@pytest.mark.anyio
+async def test_me_dr_amine(client):
+    """GET /api/v1/me with Dr. Amine's token returns his profile."""
+    token = await login_as(client, "99999", "med")
+    resp = await client.get("/api/v1/me", headers=auth_header(token))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["matricule"] == "99999"
+    assert data["specialite"] == "Cardiologie"
+
+
+# ── 5. Knowledge Base (Public) ───────────────────────────────
 
 @pytest.mark.anyio
 async def test_knowledge_base_returns_items(client):
-    """GET /api/v1/knowledge-base should return all KB entries."""
+    """GET /api/v1/knowledge-base should return all KB entries (public)."""
     resp = await client.get("/api/v1/knowledge-base")
     assert resp.status_code == 200
     data = resp.json()
@@ -77,12 +156,13 @@ async def test_knowledge_base_returns_items(client):
     assert len(data["items"]) >= 3
 
 
-# ── 4. Adherent – Dossiers ───────────────────────────────────
+# ── 6. Adherent – Dossiers (Protected) ──────────────────────
 
 @pytest.mark.anyio
-async def test_dossiers_existing_user(client):
-    """NADIA_2024 has 2 dossiers."""
-    resp = await client.get("/api/v1/adherent/dossiers", params={"matricule": "NADIA_2024"})
+async def test_dossiers_nadia(client):
+    """Nadia has 2 dossiers."""
+    token = await login_as(client, "12345", "pass")
+    resp = await client.get("/api/v1/adherent/dossiers", headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -90,19 +170,19 @@ async def test_dossiers_existing_user(client):
 
 
 @pytest.mark.anyio
-async def test_dossiers_unknown_user_returns_empty(client):
-    """An unknown matricule should return an empty list, not 404."""
-    resp = await client.get("/api/v1/adherent/dossiers", params={"matricule": "NOBODY"})
-    assert resp.status_code == 200
-    assert resp.json() == []
+async def test_dossiers_no_auth_returns_403(client):
+    """Dossiers without token should be rejected."""
+    resp = await client.get("/api/v1/adherent/dossiers")
+    assert resp.status_code == 403
 
 
-# ── 5. Adherent – Bénéficiaires ──────────────────────────────
+# ── 7. Adherent – Bénéficiaires (Protected) ──────────────────
 
 @pytest.mark.anyio
-async def test_beneficiaires_existing_user(client):
-    """NADIA_2024 has 2 beneficiaries."""
-    resp = await client.get("/api/v1/adherent/beneficiaires", params={"matricule": "NADIA_2024"})
+async def test_beneficiaires_nadia(client):
+    """Nadia has 2 beneficiaries."""
+    token = await login_as(client, "12345", "pass")
+    resp = await client.get("/api/v1/adherent/beneficiaires", headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -111,19 +191,13 @@ async def test_beneficiaires_existing_user(client):
     assert "Conjoint" in liens
 
 
-@pytest.mark.anyio
-async def test_beneficiaires_unknown_user(client):
-    resp = await client.get("/api/v1/adherent/beneficiaires", params={"matricule": "NOBODY"})
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-# ── 6. Prestations ───────────────────────────────────────────
+# ── 8. Prestations (Protected) ──────────────────────────────
 
 @pytest.mark.anyio
-async def test_prestations_adherent(client):
-    """NADIA_2024 should have at least 1 prestation."""
-    resp = await client.get("/api/v1/prestations", params={"matricule": "NADIA_2024"})
+async def test_prestations_nadia(client):
+    """Nadia should have at least 1 prestation."""
+    token = await login_as(client, "12345", "pass")
+    resp = await client.get("/api/v1/prestations", headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) >= 1
@@ -131,21 +205,23 @@ async def test_prestations_adherent(client):
 
 
 @pytest.mark.anyio
-async def test_prestations_prestataire(client):
-    """DOC_AMINE (Prestataire) should also have prestations."""
-    resp = await client.get("/api/v1/prestations", params={"matricule": "DOC_AMINE"})
+async def test_prestations_dr_amine(client):
+    """Dr. Amine (Prestataire) should also have prestations."""
+    token = await login_as(client, "99999", "med")
+    resp = await client.get("/api/v1/prestations", headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) >= 1
     assert data[0]["acte"] == "Echographie"
 
 
-# ── 7. Remboursements ────────────────────────────────────────
+# ── 9. Remboursements (Protected) ───────────────────────────
 
 @pytest.mark.anyio
-async def test_remboursements(client):
-    """NADIA_2024 has at least 1 remboursement."""
-    resp = await client.get("/api/v1/remboursements", params={"matricule": "NADIA_2024"})
+async def test_remboursements_nadia(client):
+    """Nadia has at least 1 remboursement."""
+    token = await login_as(client, "12345", "pass")
+    resp = await client.get("/api/v1/remboursements", headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) >= 1
@@ -153,34 +229,36 @@ async def test_remboursements(client):
 
 
 @pytest.mark.anyio
-async def test_remboursements_empty(client):
-    resp = await client.get("/api/v1/remboursements", params={"matricule": "DOC_AMINE"})
+async def test_remboursements_dr_amine_empty(client):
+    """Dr. Amine has no remboursements."""
+    token = await login_as(client, "99999", "med")
+    resp = await client.get("/api/v1/remboursements", headers=auth_header(token))
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-# ── 8. Réclamations – GET ────────────────────────────────────
+# ── 10. Réclamations (Protected) ─────────────────────────────
 
 @pytest.mark.anyio
 async def test_reclamations_history(client):
-    """NADIA_2024 has an existing closed ticket."""
-    resp = await client.get("/api/v1/reclamations", params={"matricule": "NADIA_2024"})
+    """Nadia has an existing closed ticket."""
+    token = await login_as(client, "12345", "pass")
+    resp = await client.get("/api/v1/reclamations", headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert any(t["statut"] == "Clôturé" for t in data)
 
 
-# ── 9. Réclamations – POST (create) ──────────────────────────
-
 @pytest.mark.anyio
 async def test_create_reclamation(client):
     """POST /api/v1/reclamations should create a new ticket."""
+    token = await login_as(client, "12345", "pass")
     payload = {
-        "matricule": "NADIA_2024",
+        "matricule": "12345",
         "objet": "Test réclamation",
         "message": "Ceci est un message de test pour vérifier la création d'un ticket."
     }
-    resp = await client.post("/api/v1/reclamations", json=payload)
+    resp = await client.post("/api/v1/reclamations", json=payload, headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "success"
@@ -190,32 +268,21 @@ async def test_create_reclamation(client):
 
 
 @pytest.mark.anyio
-async def test_create_reclamation_new_user(client):
-    """Creating a réclamation for a new matricule should auto-initialise."""
-    payload = {
-        "matricule": "NEW_USER_99",
-        "objet": "Premier contact",
-        "message": "Bonjour, j'ai un problème."
-    }
-    resp = await client.post("/api/v1/reclamations", json=payload)
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "success"
-
-
-@pytest.mark.anyio
 async def test_create_reclamation_missing_fields(client):
     """Omitting required fields should return a 422 validation error."""
-    resp = await client.post("/api/v1/reclamations", json={"matricule": "NADIA_2024"})
+    token = await login_as(client, "12345", "pass")
+    resp = await client.post("/api/v1/reclamations", json={"matricule": "12345"}, headers=auth_header(token))
     assert resp.status_code == 422
 
 
-# ── 10. Escalade ──────────────────────────────────────────────
+# ── 11. Escalade (Protected) ─────────────────────────────────
 
 @pytest.mark.anyio
 async def test_escalade(client):
     """POST /api/v1/support/escalade should return escalation info."""
+    token = await login_as(client, "12345", "pass")
     payload = {
-        "matricule": "NADIA_2024",
+        "matricule": "12345",
         "conversation_id": "conv-abc-123",
         "chat_history": [
             {"role": "user", "content": "J'ai un problème urgent"},
@@ -223,7 +290,7 @@ async def test_escalade(client):
         ],
         "reason": "Problème critique"
     }
-    resp = await client.post("/api/v1/support/escalade", json=payload)
+    resp = await client.post("/api/v1/support/escalade", json=payload, headers=auth_header(token))
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "escalated"
@@ -235,9 +302,10 @@ async def test_escalade(client):
 @pytest.mark.anyio
 async def test_escalade_missing_history(client):
     """chat_history is required – omitting it should 422."""
+    token = await login_as(client, "12345", "pass")
     payload = {
-        "matricule": "NADIA_2024",
+        "matricule": "12345",
         "conversation_id": "conv-xyz"
     }
-    resp = await client.post("/api/v1/support/escalade", json=payload)
+    resp = await client.post("/api/v1/support/escalade", json=payload, headers=auth_header(token))
     assert resp.status_code == 422
