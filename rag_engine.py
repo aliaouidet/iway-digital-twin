@@ -62,9 +62,9 @@ class RAGEngine:
         import faiss
         from sentence_transformers import SentenceTransformer
 
-        # 1. Load embedder
-        logger.info("Loading embedding model (all-MiniLM-L6-v2)...")
-        self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        # 1. Load multilingual embedder (384-dim, optimized for French)
+        logger.info("Loading multilingual embedding model (paraphrase-multilingual-MiniLM-L12-v2)...")
+        self._embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 
         # 2. Get knowledge base
         if knowledge_base is None:

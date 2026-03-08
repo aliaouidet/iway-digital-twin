@@ -6,8 +6,13 @@ Requires: Mock Server running on :8000  (python main.py)
 """
 
 import os
+import uuid
 import time
 import json
+import base64
+import asyncio
+import threading
+import queue as queue_module
 import requests
 import streamlit as st
 from datetime import datetime
@@ -277,6 +282,8 @@ defaults = {
     "user_name": None,
     "user_role": None,
     "agent": None,
+    "thread_id": None,
+    "streaming": False,
     "response_times": [],
     "tool_calls_count": 0,
     "turn_count": 0,
@@ -317,6 +324,7 @@ def do_login(matricule: str, password: str):
             st.session_state.response_times = []
             st.session_state.tool_calls_count = 0
             st.session_state.turn_count = 0
+            st.session_state.thread_id = f"{matricule}-{uuid.uuid4().hex[:8]}"
             st.session_state.agent = get_cached_agent()
             st.rerun()
         else:
@@ -337,6 +345,7 @@ def clear_conversation():
     st.session_state.response_times = []
     st.session_state.tool_calls_count = 0
     st.session_state.turn_count = 0
+    st.session_state.thread_id = f"{st.session_state.matricule}-{uuid.uuid4().hex[:8]}"
     st.rerun()
 
 
@@ -353,44 +362,82 @@ def export_conversation() -> str:
     return json.dumps(export, indent=2, ensure_ascii=False)
 
 
-def send_message(text: str):
-    """Process a user message through the LangGraph agent."""
-    now_str = datetime.now().strftime("%H:%M:%S")
-    user_msg = HumanMessage(content=text)
-    st.session_state.messages.append(user_msg)
-    st.session_state.timestamps.append(now_str)
+def _extract_text(content) -> str:
+    """Normalize LLM content to plain text.
 
-    t_start = time.time()
+    Gemini 2.5 Flash returns content as a list of dicts:
+      [{'type': 'text', 'text': '...'}, ...]
+    Ollama/OpenAI returns a plain string.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(content) if content else ""
 
-    try:
-        result = st.session_state.agent.invoke({
-            "messages": st.session_state.messages,
-            "matricule": st.session_state.matricule,
-            "token": st.session_state.token,
-        })
 
-        elapsed = time.time() - t_start
-        result_messages = result.get("messages", [])
-        new_messages = result_messages[len(st.session_state.messages):]
+# ── Streaming Engine ──────────────────────────────────────────
 
-        turn_tools = 0
-        for m in new_messages:
-            if isinstance(m, AIMessage) and hasattr(m, "tool_calls") and m.tool_calls:
-                turn_tools += len(m.tool_calls)
+_TOOL_LABELS = {
+    "search_knowledge_base": "\U0001f4da Recherche dans la base de connaissances\u2026",
+    "get_personal_dossiers": "\U0001f50d R\u00e9cup\u00e9ration de vos dossiers\u2026",
+    "escalate_to_human": "\U0001f464 Transfert vers un agent humain\u2026",
+    "analyze_medical_receipt": "\U0001f9fe Analyse de la facture m\u00e9dicale\u2026",
+}
 
-        st.session_state.messages = result_messages
-        while len(st.session_state.timestamps) < len(result_messages):
-            st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
 
-        st.session_state.turn_count += 1
-        st.session_state.tool_calls_count += turn_tools
-        st.session_state.response_times.append(elapsed)
+def _stream_events(agent, state: dict, config: dict):
+    """Sync generator bridging async LangGraph astream_events to Streamlit.
 
-    except Exception as e:
-        st.session_state.messages.append(
-            AIMessage(content=f"Error: {str(e)}")
-        )
-        st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
+    Yields dicts with keys: event, name, data.
+    Uses a background thread + queue so Streamlit's main thread
+    can iterate synchronously while the async loop runs.
+    """
+    q: queue_module.Queue = queue_module.Queue()
+
+    def _worker():
+        loop = asyncio.new_event_loop()
+        async def _run():
+            async for ev in agent.astream_events(
+                state, config=config, version="v2"
+            ):
+                q.put(ev)
+            q.put(None)  # sentinel
+        try:
+            loop.run_until_complete(_run())
+        except Exception as exc:
+            q.put({"event": "error", "data": str(exc)})
+            q.put(None)
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    while True:
+        try:
+            ev = q.get(timeout=120)
+        except queue_module.Empty:
+            yield {"event": "error", "data": "Timeout : l\u2019IA n\u2019a pas r\u00e9pondu dans les 2 minutes."}
+            break
+        if ev is None:
+            break
+        yield ev
+
+    thread.join(timeout=5)
+
+
+def _enqueue_message(msg):
+    """Add a user message to session state and trigger streaming."""
+    st.session_state.messages.append(msg)
+    st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
+    st.session_state.streaming = True
 
 
 # ── Sidebar ───────────────────────────────────────────────────
@@ -544,15 +591,15 @@ QUICK_QUESTIONS = [
     "Je veux parler a un agent humain",
 ]
 
-if st.session_state.turn_count == 0:
-    st.markdown('<div class="quick-label">Quick Start — click a question</div>', unsafe_allow_html=True)
+if st.session_state.turn_count == 0 and not st.session_state.streaming:
+    st.markdown('<div class="quick-label">Quick Start \u2014 click a question</div>', unsafe_allow_html=True)
     row1 = st.columns(3)
     row2 = st.columns(3)
     all_cols = row1 + row2
     for i, q in enumerate(QUICK_QUESTIONS):
         with all_cols[i]:
             if st.button(q, key=f"qa_{i}", use_container_width=True):
-                send_message(q)
+                _enqueue_message(HumanMessage(content=q))
                 st.rerun()
 
 
@@ -577,7 +624,15 @@ for idx, msg in enumerate(st.session_state.messages):
 
     if isinstance(msg, HumanMessage):
         with st.chat_message("user"):
-            st.markdown(msg.content)
+            # Handle multi-modal messages (text + image)
+            if isinstance(msg.content, list):
+                for block in msg.content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        st.markdown(block["text"])
+                    elif isinstance(block, dict) and block.get("type") == "image_url":
+                        st.image(block["image_url"]["url"], caption="Facture m\u00e9dicale", width=300)
+            else:
+                st.markdown(msg.content)
             if ts:
                 st.markdown(f'<div class="ts">{ts}</div>', unsafe_allow_html=True)
 
@@ -587,13 +642,137 @@ for idx, msg in enumerate(st.session_state.messages):
                 tools_list = ", ".join(tc["name"] for tc in msg.tool_calls)
                 st.caption(f"Calling: {tools_list}")
             elif msg.content:
-                st.markdown(msg.content)
+                display_text = _extract_text(msg.content)
+                if display_text:
+                    st.markdown(display_text)
                 if ts:
                     st.markdown(f'<div class="ts">{ts}</div>', unsafe_allow_html=True)
 
 
-# ── Chat Input ────────────────────────────────────────────────
+# ── Streaming Response Block ───────────────────────────────
+
+if st.session_state.streaming and st.session_state.messages:
+    last_msg = st.session_state.messages[-1]
+    if isinstance(last_msg, HumanMessage):
+        config = {"configurable": {"thread_id": st.session_state.thread_id}}
+        state = {
+            "messages": [last_msg],
+            "matricule": st.session_state.matricule,
+            "token": st.session_state.token,
+        }
+
+        t_start = time.time()
+        accumulated = ""
+        had_error = False
+
+        with st.chat_message("assistant"):
+            tool_status = st.empty()
+            response_area = st.empty()
+
+            try:
+                for ev in _stream_events(st.session_state.agent, state, config):
+                    kind = ev.get("event", "")
+
+                    if kind == "on_tool_start":
+                        name = ev.get("name", "")
+                        label = _TOOL_LABELS.get(name, f"\U0001f527 {name}\u2026")
+                        tool_status.info(label)
+
+                    elif kind == "on_tool_end":
+                        tool_status.empty()
+
+                    elif kind == "on_chat_model_stream":
+                        chunk = ev.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            text = _extract_text(chunk.content)
+                            if text:
+                                accumulated += text
+                                response_area.markdown(accumulated + " \u258c")
+
+                    elif kind == "error":
+                        err = ev.get("data", "Erreur inconnue")
+                        if "500" in str(err):
+                            response_area.error(
+                                "Erreur 500 : V\u00e9rifiez le mod\u00e8le Ollama "
+                                "(`ollama list`) et la VRAM disponible."
+                            )
+                        else:
+                            response_area.error(f"Erreur: {err}")
+                        had_error = True
+
+            except Exception as exc:
+                response_area.error(f"Erreur: {exc}")
+                had_error = True
+
+            # Finalize the streamed response
+            tool_status.empty()
+            if accumulated:
+                response_area.markdown(accumulated)
+
+        elapsed = time.time() - t_start
+
+        # Read final state from the checkpointer
+        if not had_error:
+            try:
+                final_state = st.session_state.agent.get_state(config)
+                result_messages = list(final_state.values["messages"])
+
+                # Fallback: if streaming didn't capture any tokens,
+                # extract the final AI response from the checkpointer
+                if not accumulated and result_messages:
+                    for m in reversed(result_messages):
+                        if isinstance(m, AIMessage) and m.content:
+                            fallback_text = _extract_text(m.content)
+                            if fallback_text:
+                                response_area.markdown(fallback_text)
+                            break
+
+                new_messages = result_messages[len(st.session_state.messages):]
+                turn_tools = sum(
+                    len(m.tool_calls)
+                    for m in new_messages
+                    if isinstance(m, AIMessage) and hasattr(m, "tool_calls") and m.tool_calls
+                )
+
+                st.session_state.messages = result_messages
+                while len(st.session_state.timestamps) < len(result_messages):
+                    st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
+
+                st.session_state.turn_count += 1
+                st.session_state.tool_calls_count += turn_tools
+                st.session_state.response_times.append(elapsed)
+            except Exception:
+                pass  # State update failed; content was already displayed
+
+        st.session_state.streaming = False
+        st.rerun()
+
+
+# ── Chat Input + Image Upload ─────────────────────────────────
+
+def _on_file_upload():
+    """Callback: auto-enqueue the uploaded receipt for analysis."""
+    f = st.session_state.get("receipt_upload")
+    if f is not None:
+        b64 = base64.b64encode(f.getvalue()).decode("utf-8")
+        mime = "image/png" if f.name.lower().endswith(".png") else "image/jpeg"
+        img_msg = HumanMessage(content=[
+            {"type": "text", "text": "Analyse cette facture m\u00e9dicale et calcule mon remboursement."},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+        ])
+        _enqueue_message(img_msg)
+
+
+col_upload, col_input = st.columns([1, 3])
+with col_upload:
+    st.file_uploader(
+        "\U0001f4f7 Joindre une facture",
+        type=["png", "jpg", "jpeg"],
+        label_visibility="collapsed",
+        key="receipt_upload",
+        on_change=_on_file_upload,
+    )
 
 if user_input := st.chat_input("Posez votre question..."):
-    send_message(user_input)
+    _enqueue_message(HumanMessage(content=user_input))
     st.rerun()

@@ -63,43 +63,52 @@ async def get_token(client, matricule="12345", password="pass") -> str:
 # ═══════════════════════════════════════════════════════════════
 
 class TestSearchKnowledgeBase:
-    """Test semantic search via FAISS RAG engine."""
+    """Test semantic search via FAISS RAG engine (async tools)."""
 
-    def test_dental_query(self):
-        result = search_knowledge_base.invoke({"query": "plafond soins dentaires"})
+    @pytest.mark.anyio
+    async def test_dental_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "plafond soins dentaires"})
         assert "600 TND" in result
 
-    def test_birth_premium_query(self):
-        result = search_knowledge_base.invoke({"query": "prime de naissance"})
+    @pytest.mark.anyio
+    async def test_birth_premium_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "prime de naissance"})
         assert "300 TND" in result
 
-    def test_reimbursement_query(self):
-        result = search_knowledge_base.invoke({"query": "delai remboursement soins"})
+    @pytest.mark.anyio
+    async def test_reimbursement_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "delai remboursement soins"})
         assert "48h" in result
 
-    def test_beneficiary_query(self):
-        result = search_knowledge_base.invoke({"query": "ajouter un beneficiaire famille"})
+    @pytest.mark.anyio
+    async def test_beneficiary_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "ajouter un beneficiaire famille"})
         assert "Ma Famille" in result
 
-    def test_optical_query(self):
-        result = search_knowledge_base.invoke({"query": "lunettes optique verres"})
+    @pytest.mark.anyio
+    async def test_optical_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "lunettes optique verres"})
         assert "250 TND" in result
 
-    def test_hospitalization_query(self):
-        result = search_knowledge_base.invoke({"query": "hospitalisation urgence"})
+    @pytest.mark.anyio
+    async def test_hospitalization_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "hospitalisation urgence"})
         assert "90%" in result or "urgence" in result.lower()
 
-    def test_chronic_illness_query(self):
-        result = search_knowledge_base.invoke({"query": "maladie chronique diabete"})
+    @pytest.mark.anyio
+    async def test_chronic_illness_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "maladie chronique diabete"})
         assert "100%" in result
 
-    def test_maternity_query(self):
-        result = search_knowledge_base.invoke({"query": "conge maternite accouchement"})
+    @pytest.mark.anyio
+    async def test_maternity_query(self):
+        result = await search_knowledge_base.ainvoke({"query": "conge maternite accouchement"})
         assert "30 jours" in result or "accouchement" in result.lower()
 
-    def test_returns_ranked_results(self):
+    @pytest.mark.anyio
+    async def test_returns_ranked_results(self):
         """Search results should include ranking and pertinence scores."""
-        result = search_knowledge_base.invoke({"query": "soins dentaires"})
+        result = await search_knowledge_base.ainvoke({"query": "soins dentaires"})
         assert "Resultat 1" in result
         assert "pertinence" in result
 
@@ -176,14 +185,15 @@ class TestGetPersonalDossiers:
         resp = await client.get("/api/v1/adherent/dossiers")
         assert resp.status_code == 403
 
-    def test_tool_handles_connection_error(self):
+    @pytest.mark.anyio
+    async def test_tool_handles_connection_error(self):
         """If server is down, tool returns a friendly error."""
         # Use a port that's definitely not running
         import bot_tools
         original_url = bot_tools.MOCK_SERVER_URL
         bot_tools.MOCK_SERVER_URL = "http://localhost:19999"
         try:
-            result = get_personal_dossiers.invoke({"matricule": "12345", "token": "fake"})
+            result = await get_personal_dossiers.ainvoke({"matricule": "12345", "token": "fake"})
             assert "Erreur" in result
         finally:
             bot_tools.MOCK_SERVER_URL = original_url
@@ -227,13 +237,14 @@ class TestEscalateToHuman:
         resp = await client.post("/api/v1/support/escalade", json=payload)
         assert resp.status_code == 403
 
-    def test_escalation_tool_handles_connection_error(self):
+    @pytest.mark.anyio
+    async def test_escalation_tool_handles_connection_error(self):
         """If server is down, tool returns a friendly error."""
         import bot_tools
         original_url = bot_tools.MOCK_SERVER_URL
         bot_tools.MOCK_SERVER_URL = "http://localhost:19999"
         try:
-            result = escalate_to_human.invoke({
+            result = await escalate_to_human.ainvoke({
                 "matricule": "12345",
                 "token": "fake",
                 "issue_description": "test"
