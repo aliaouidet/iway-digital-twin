@@ -135,11 +135,29 @@ class RAGEngine:
         return "\n\n".join(results)
 
     def _fetch_kb(self) -> list:
-        """Load KB from main.py's MOCK_DB directly."""
-        from main import MOCK_DB
-        kb = MOCK_DB.get("knowledge_base", [])
-        logger.info(f"Loaded {len(kb)} KB entries from MOCK_DB")
-        return kb
+        """Load KB from the backend API, falling back to direct import for local dev."""
+        # In Docker, main.py is in a separate container — use HTTP API
+        try:
+            import httpx
+            resp = httpx.get(
+                f"{MOCK_SERVER_URL}/api/v1/knowledge-base", timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            kb = data.get("items", [])
+            logger.info(f"Loaded {len(kb)} KB entries from API ({MOCK_SERVER_URL})")
+            return kb
+        except Exception as api_err:
+            logger.warning(f"API fetch failed ({api_err}), trying direct import...")
+        # Fallback: direct import works when running locally alongside main.py
+        try:
+            from main import MOCK_DB
+            kb = MOCK_DB.get("knowledge_base", [])
+            logger.info(f"Loaded {len(kb)} KB entries from MOCK_DB (direct import)")
+            return kb
+        except ImportError:
+            logger.error("Could not load knowledge base from API or direct import.")
+            return []
 
 
 # ── Module-level singleton ────────────────────────────────────
