@@ -21,25 +21,25 @@ This project implements a **mock-first** approach to building an AI-powered insu
 ## Architecture
 
 ```
-                        +------------------+
-                        |   Streamlit UI   |   (chat_ui.py)
-                        +--------+---------+
-                                 |
-                        +--------+---------+
-                        |  LangGraph Agent |   (agent.py)
-                        +--------+---------+
-                                 |
-               +-----------------+-----------------+
-               |                 |                 |
-      +--------+------+  +------+-------+  +------+--------+
-      | API Tool      |  | RAG Tool     |  | Escalation    |
-      | (dossiers)    |  | (FAISS)      |  | Tool          |
-      +--------+------+  +------+-------+  +------+--------+
-               |                 |                 |
-      +--------+-----------------+-----------------+--------+
-      |              Mock API Server (FastAPI)               |
-      |                    main.py                           |
-      +-----------------------------------------------------+
++-------------------------------------------------------------+
+|                        Docker Host                          |
+|                                                             |
+|   +------------------+             +--------------------+   |
+|   |   Streamlit UI   |             |   FastAPI Server   |   |
+|   | (chat_ui cont.)  |<---HTTP---->| (backend container)|   |
+|   +--------+---------+             +---------+----------+   |
+|            |                                 |              |
+|   +--------+---------+             +---------+----------+   |
+|   |  LangGraph Agent |             |      Mock DB       |   |
+|   |                  |             |   & Auth System    |   |
+|   +--------+---------+             +---------+----------+   |
+|            |                                                |
+|   +--------+------------------------------------+           |
+|   |                 LangChain Tools             |           |
+|   | [API Dossiers] [FAISS RAG] [Escalation]     |           |
+|   +---------------------------------------------+           |
+|                                                             |
++-------------------------------------------------------------+
 ```
 
 ## Tech Stack
@@ -56,22 +56,13 @@ This project implements a **mock-first** approach to building an AI-powered insu
 | Testing | pytest + httpx (async) |
 | Config | python-dotenv |
 
-## Quick Start
+## Quick Start (Docker)
 
-### 1. Clone and setup
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/aliaouidet/iway-digital-twin.git
 cd iway-digital-twin
-python -m venv venv
-
-# Windows
-.\venv\Scripts\activate
-
-# macOS / Linux
-source venv/bin/activate
-
-pip install -r requirements.txt
 ```
 
 ### 2. Configure environment
@@ -85,31 +76,30 @@ Edit `.env` and set your `GOOGLE_API_KEY` (get one at [Google AI Studio](https:/
 ```env
 GOOGLE_API_KEY=your_actual_api_key_here
 ```
+*(Note: Inside Docker, `MOCK_SERVER_URL` should be `http://backend:8000` as provided in `.env.example`)*
 
-### 3. Run the Mock Server
+### 3. Start the containers
 
-```bash
-python main.py
-```
-
-The API will be live at **http://localhost:8000** with interactive docs at **http://localhost:8000/docs**.
-
-### 4. Run the Chat UI
-
-In a second terminal:
+The project uses Docker Compose to orchestrate the backend and chat UI services.
 
 ```bash
-streamlit run chat_ui.py
+docker compose up --build -d
 ```
 
-Open **http://localhost:8501**, log in as Nadia or Dr. Amine, and start chatting.
+This will spin up:
+- **Backend API**: http://localhost:8000 (Interactive docs at [http://localhost:8000/docs](http://localhost:8000/docs))
+- **Streamlit Chat UI**: http://localhost:8501
+
+### 4. Use the Chat UI
+
+Open **http://localhost:8501**, log in as **Nadia** (`12345`) or **Dr. Amine** (`99999`), and start chatting.
 
 ### 5. Run the Agent (CLI)
 
-Alternatively, test the agent in the terminal:
+Alternatively, test the agent in the terminal without UI:
 
 ```bash
-python agent.py
+docker compose exec chat_ui python ai_engine/agent.py
 ```
 
 ## Project Structure
@@ -217,15 +207,14 @@ The RAG architecture is designed for incremental upgrades:
 
 ## Running Tests
 
+You can run the tests inside the containers:
+
 ```bash
-# Run all tests (46 total)
-pytest test_main.py test_bot_tools.py -v
+# Run backend server tests (22 tests)
+docker compose exec backend pytest test_main.py -v
 
-# Run only server tests (22)
-pytest test_main.py -v
-
-# Run only AI/tool tests (24)
-pytest test_bot_tools.py -v
+# Run AI/tool tests (24 tests)
+docker compose exec chat_ui pytest ai_engine/test_bot_tools.py -v
 ```
 
 ## Environment Variables

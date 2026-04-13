@@ -51,7 +51,7 @@ MOCK_SERVER_URL = os.getenv("MOCK_SERVER_URL", "http://localhost:8000")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
 
-SYSTEM_PROMPT = """Tu es l'assistant virtuel I-Santé, l'assistant intelligent de la mutuelle I-Way Solutions.
+SYSTEM_PROMPT ="""Tu es l'assistant virtuel I-Santé, l'assistant intelligent de la mutuelle I-Way Solutions.
 
 RÈGLES STRICTES :
 1. Tu parles TOUJOURS en français.

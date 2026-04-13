@@ -300,8 +300,12 @@ for k, v in defaults.items():
 def get_cached_agent():
     """Build and cache the agent graph + pre-warm RAG model (called once)."""
     import rag_engine
+    print("[INIT] Loading RAG engine (sentence-transformers model)...", flush=True)
     rag_engine.get_engine()  # Pre-load sentence-transformers model
-    return build_agent_graph()
+    print("[INIT] Building LangGraph agent...", flush=True)
+    agent = build_agent_graph()
+    print("[INIT] Agent ready!", flush=True)
+    return agent
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -325,7 +329,11 @@ def do_login(matricule: str, password: str):
             st.session_state.tool_calls_count = 0
             st.session_state.turn_count = 0
             st.session_state.thread_id = f"{matricule}-{uuid.uuid4().hex[:8]}"
-            st.session_state.agent = get_cached_agent()
+            try:
+                st.session_state.agent = get_cached_agent()
+            except Exception as e:
+                print(f"[ERROR] Failed to build agent during login: {e}", flush=True)
+                st.session_state.agent = None
             st.rerun()
         else:
             st.sidebar.error(f"Login failed (HTTP {resp.status_code})")
@@ -654,6 +662,18 @@ for idx, msg in enumerate(st.session_state.messages):
 if st.session_state.streaming and st.session_state.messages:
     last_msg = st.session_state.messages[-1]
     if isinstance(last_msg, HumanMessage):
+        # Lazy-init agent if it wasn't created during login
+        if st.session_state.agent is None:
+            try:
+                with st.spinner("Loading AI model (first time may take a minute)..."):
+                    st.session_state.agent = get_cached_agent()
+            except Exception as e:
+                st.error(f"Failed to initialize AI agent: {e}")
+                print(f"[ERROR] Agent init failed: {e}", flush=True)
+                import traceback; traceback.print_exc()
+                st.session_state.streaming = False
+                st.stop()
+
         config = {"configurable": {"thread_id": st.session_state.thread_id}}
         state = {
             "messages": [last_msg],
@@ -691,6 +711,7 @@ if st.session_state.streaming and st.session_state.messages:
 
                     elif kind == "error":
                         err = ev.get("data", "Erreur inconnue")
+                        print(f"[ERROR] Streaming error: {err}", flush=True)
                         if "500" in str(err):
                             response_area.error(
                                 "Erreur 500 : V\u00e9rifiez le mod\u00e8le Ollama "
@@ -701,6 +722,8 @@ if st.session_state.streaming and st.session_state.messages:
                         had_error = True
 
             except Exception as exc:
+                print(f"[ERROR] Exception during streaming: {type(exc).__name__}: {exc}", flush=True)
+                import traceback; traceback.print_exc()
                 response_area.error(f"Erreur: {exc}")
                 had_error = True
 
@@ -713,6 +736,7 @@ if st.session_state.streaming and st.session_state.messages:
 
         # Read final state from the checkpointer
         if not had_error:
+            state_saved = False
             try:
                 final_state = st.session_state.agent.get_state(config)
                 result_messages = list(final_state.values["messages"])
@@ -741,8 +765,21 @@ if st.session_state.streaming and st.session_state.messages:
                 st.session_state.turn_count += 1
                 st.session_state.tool_calls_count += turn_tools
                 st.session_state.response_times.append(elapsed)
-            except Exception:
-                pass  # State update failed; content was already displayed
+                state_saved = True
+            except Exception as exc:
+                print(f"[WARN] get_state() failed: {exc}", flush=True)
+
+            # Fallback: if checkpointer didn't save state, manually
+            # append the AI response so it persists across reruns
+            if not state_saved and accumulated:
+                st.session_state.messages.append(
+                    AIMessage(content=accumulated)
+                )
+                st.session_state.timestamps.append(
+                    datetime.now().strftime("%H:%M:%S")
+                )
+                st.session_state.turn_count += 1
+                st.session_state.response_times.append(elapsed)
 
         st.session_state.streaming = False
         st.rerun()
