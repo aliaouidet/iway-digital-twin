@@ -1,0 +1,120 @@
+# ============================================================
+# I-Way Digital Twin — Docker Compose
+# Enterprise-grade local development environment
+# ============================================================
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f api    # Follow API logs
+#   docker compose down -v        # Stop + remove volumes
+# ============================================================
+
+services:
+
+  # --- PostgreSQL + pgvector ---
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: iway-db
+    environment:
+      POSTGRES_DB: iway_db
+      POSTGRES_USER: iway
+      POSTGRES_PASSWORD: iway_secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iway -d iway_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # --- Redis (pub/sub, cache, Celery broker) ---
+  redis:
+    image: redis:7-alpine
+    container_name: iway-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --- FastAPI Backend ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iway-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app  # Hot reload in development
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Celery Worker (background tasks: LLM inference, sync, embedding) ---
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iway-worker
+    command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Ollama (Local LLM Serving) ---
+  # Uncomment and configure GPU passthrough for local LLM support
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: iway-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_models:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  # ollama_models:
