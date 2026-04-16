@@ -1,198 +1,143 @@
-import { Component, signal, ElementRef, ViewChild, AfterViewChecked } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef, AfterViewChecked, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
+import { WebSocketService, WsMessage } from '../../../core/services/websocket.service';
+import { AuthService } from '../../../core/services/auth.service';
+import { TicketService } from '../../../core/services/ticket.service';
 
-interface ChatMessage {
+interface ChatMsg {
   id: string;
-  role: 'user' | 'rag' | 'ai' | 'system';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
-  processor?: 'RAG' | 'AI Model' | 'Failed – Human Pending';
-  confidence?: number;
-  sources?: string[];
-}
-
-interface ConversationThread {
-  id: string;
-  userId: string;
-  status: 'active' | 'resolved' | 'escalated';
-  lastMessage: string;
-  time: string;
-  unread: number;
+  processor?: string;
+  isStreaming?: boolean;
 }
 
 @Component({
   selector: 'app-chat',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="h-[calc(100vh-12rem)] flex gap-6">
-
-      <!-- Conversation List -->
-      <div class="w-72 flex-shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-        <div class="p-4 border-b border-slate-100">
-          <h2 class="font-bold text-slate-800 text-base mb-3">Live Conversations</h2>
-          <div class="relative">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
-            <input placeholder="Search..." class="pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-300 transition"/>
-          </div>
-        </div>
-        <div class="flex-1 overflow-y-auto divide-y divide-slate-50">
-          <div *ngFor="let thread of threads" (click)="activeThread.set(thread)"
-            [class]="'p-4 cursor-pointer transition-all ' + (activeThread()?.id === thread.id ? 'bg-indigo-50' : 'hover:bg-slate-50')">
-            <div class="flex items-start justify-between mb-1">
-              <span class="font-semibold text-slate-800 text-sm truncate">{{thread.userId}}</span>
-              <span class="text-xs text-slate-400 flex-shrink-0 ml-2">{{thread.time}}</span>
-            </div>
-            <div class="text-xs text-slate-500 truncate mb-2">{{thread.lastMessage}}</div>
-            <div class="flex items-center gap-2">
-              <span [class]="getThreadStatusClass(thread.status)" class="text-xs px-2 py-0.5 rounded-full font-medium">{{thread.status}}</span>
-              <span *ngIf="thread.unread" class="ml-auto w-5 h-5 bg-indigo-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{{thread.unread}}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Chat Window -->
-      <div class="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+    <div class="flex h-[calc(100vh-8rem)] gap-6">
+      <!-- Chat Area -->
+      <div class="flex-1 flex flex-col bg-[#0F172A] rounded-2xl border border-slate-800 overflow-hidden">
         <!-- Chat Header -->
-        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <div class="flex items-center gap-3" *ngIf="activeThread()">
-            <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
-              {{activeThread()!.userId.charAt(0).toUpperCase()}}
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z"/></svg>
             </div>
             <div>
-              <div class="font-semibold text-slate-800">{{activeThread()!.userId}}</div>
-              <div class="text-xs text-slate-400 flex items-center gap-1">
+              <h3 class="text-sm font-bold text-white">I-Sante AI Assistant</h3>
+              <div class="flex items-center gap-1.5 text-xs text-slate-500">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                Active session · ticket {{activeThread()!.id}}
+                Online · RAG + LLM Pipeline
               </div>
             </div>
           </div>
-          <div *ngIf="!activeThread()" class="text-slate-400 text-sm">Select a conversation</div>
-          <div class="flex gap-2">
-            <button class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 transition">Escalate</button>
-            <button class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition">Resolve</button>
-          </div>
+          <button (click)="clearChat()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs text-slate-400 hover:text-white transition-colors cursor-pointer">
+            Clear
+          </button>
         </div>
 
         <!-- Messages -->
-        <div #messagesContainer class="flex-1 overflow-y-auto p-6 space-y-5 bg-slate-50/30">
-          <ng-container *ngFor="let msg of messages">
-            <!-- User message -->
-            <div *ngIf="msg.role === 'user'" class="flex justify-end">
-              <div class="max-w-[70%]">
-                <div class="bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed shadow-sm">
-                  {{msg.content}}
-                </div>
-                <div class="text-right text-xs text-slate-400 mt-1">{{msg.timestamp}}</div>
-              </div>
+        <div #messagesContainer class="flex-1 overflow-y-auto px-6 py-6 space-y-6 custom-scrollbar">
+          <!-- Welcome State -->
+          <div *ngIf="messages().length === 0" class="flex flex-col items-center justify-center h-full text-center">
+            <div class="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-5">
+              <svg class="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
             </div>
-
-            <!-- System / AI message -->
-            <div *ngIf="msg.role !== 'user' && msg.role !== 'system'" class="flex items-start gap-3">
-              <div [class]="getProcessorIconClass(msg.processor)" class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 shadow-sm">
-                {{getProcessorIcon(msg.processor)}}
-              </div>
-              <div class="max-w-[75%]">
-                <div class="flex items-center gap-2 mb-1.5">
-                  <span [class]="getProcessorBadgeClass(msg.processor)" class="text-xs px-2 py-0.5 rounded-full font-semibold">{{msg.processor}}</span>
-                  <span *ngIf="msg.confidence" class="text-xs text-slate-400">{{msg.confidence}}% confidence</span>
-                </div>
-                <div [class]="getMessageBubbleClass(msg.processor)" class="rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed shadow-sm">
-                  {{msg.content}}
-                </div>
-                <div *ngIf="msg.sources?.length" class="mt-2 flex flex-wrap gap-1">
-                  <span *ngFor="let src of msg.sources" class="inline-flex items-center gap-1 text-xs bg-white border border-slate-200 text-slate-500 px-2 py-0.5 rounded-md">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    {{src}}
-                  </span>
-                </div>
-                <div class="text-xs text-slate-400 mt-1">{{msg.timestamp}}</div>
-              </div>
+            <h3 class="text-lg font-bold text-white mb-2" style="font-family: 'Figtree', sans-serif;">Ask I-Sante anything</h3>
+            <p class="text-sm text-slate-500 max-w-md">Questions about insurance coverage, reimbursements, medical claims, and more — powered by RAG + AI.</p>
+            <div class="grid grid-cols-2 gap-2 mt-6 max-w-sm">
+              <button *ngFor="let q of quickQuestions" (click)="sendQuickQuestion(q)"
+                class="px-3 py-2 bg-slate-800/60 border border-slate-700/50 hover:border-indigo-500/50 rounded-xl text-xs text-slate-400 hover:text-white transition-all cursor-pointer text-left">
+                {{q}}
+              </button>
             </div>
+          </div>
 
-            <!-- System event -->
-            <div *ngIf="msg.role === 'system'" class="flex justify-center">
-              <span class="text-xs bg-slate-100 text-slate-500 px-4 py-1.5 rounded-full font-medium">{{msg.content}}</span>
-            </div>
-          </ng-container>
-
-          <!-- Typing indicator -->
-          <div *ngIf="isTyping()" class="flex items-start gap-3">
-            <div class="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 text-xs font-bold">R</div>
-            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm flex items-center gap-1.5">
-              <span class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-              <span class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-              <span class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+          <!-- Message List -->
+          <div *ngFor="let msg of messages()" class="flex" [class]="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+            <div class="max-w-[70%] group">
+              <!-- User Message -->
+              <div *ngIf="msg.role === 'user'" class="bg-indigo-600 px-5 py-3 rounded-2xl rounded-br-md">
+                <p class="text-sm text-white leading-relaxed">{{msg.content}}</p>
+              </div>
+              <!-- Assistant Message -->
+              <div *ngIf="msg.role === 'assistant'" class="flex items-start gap-3">
+                <div class="w-7 h-7 rounded-lg bg-indigo-500/15 flex items-center justify-center flex-shrink-0 mt-1">
+                  <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25"/></svg>
+                </div>
+                <div class="bg-slate-800/60 px-5 py-3 rounded-2xl rounded-bl-md border border-slate-700/50">
+                  <p class="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{{msg.content}}<span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 bg-indigo-400 animate-pulse ml-0.5 align-text-bottom rounded-sm"></span></p>
+                  <div *ngIf="msg.processor" class="mt-2 flex items-center gap-2">
+                    <span [class]="getProcessorBadge(msg.processor)">{{msg.processor}}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="text-[10px] text-slate-600 mt-1" [class]="msg.role === 'user' ? 'text-right' : 'text-left pl-10'">{{msg.timestamp}}</div>
             </div>
           </div>
         </div>
 
-        <!-- Input -->
-        <div class="px-6 py-4 border-t border-slate-100 bg-white">
-          <div class="flex gap-3 items-end">
+        <!-- Input Area -->
+        <div class="p-4 border-t border-slate-800">
+          <form (ngSubmit)="sendMessage()" class="flex gap-3 items-end">
             <div class="flex-1 relative">
-              <textarea [(ngModel)]="draftMessage" (keydown.enter)="sendMessage()" rows="1"
-                placeholder="Type an override message or monitor passively…"
-                class="w-full resize-none border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 transition leading-relaxed pr-24"></textarea>
-              <div class="absolute right-3 bottom-3 flex gap-1.5">
-                <button class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 transition" title="Attach file">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
-                </button>
-              </div>
+              <textarea [(ngModel)]="newMessage" name="message"
+                rows="1"
+                placeholder="Ask about coverage, claims, reimbursements..."
+                class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all resize-none"
+                (keydown.enter)="$any($event).shiftKey ? null : onEnter($event)"></textarea>
             </div>
-            <button (click)="sendMessage()" class="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition shadow-md shadow-indigo-200 flex items-center gap-2 flex-shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
-              Send
+            <button type="submit" [disabled]="!newMessage.trim() || isSending()"
+              class="w-11 h-11 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed flex-shrink-0">
+              <svg *ngIf="!isSending()" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+              <svg *ngIf="isSending()" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
             </button>
-          </div>
+          </form>
         </div>
       </div>
 
       <!-- Context Panel -->
-      <div class="w-64 flex-shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-        <div class="p-4 border-b border-slate-100">
-          <h3 class="font-bold text-slate-800 text-sm">Session Context</h3>
+      <div class="w-72 space-y-4 hidden xl:block">
+        <div class="bg-[#0F172A] rounded-2xl border border-slate-800 p-5">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Session Info</h3>
+          <div class="space-y-3">
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Messages</span><span class="text-white font-semibold">{{messages().length}}</span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Pipeline</span><span class="text-emerald-400 font-semibold text-xs">RAG → LLM → Human</span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Model</span><span class="text-slate-300 font-semibold text-xs">Gemini 2.5 Flash</span></div>
+          </div>
         </div>
-        <div class="p-4 space-y-4 text-sm overflow-y-auto">
-          <div>
-            <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Processing Path</div>
-            <div class="space-y-2">
-              <div class="flex items-center gap-2 text-xs">
-                <div class="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">1</div>
-                <span class="text-slate-600">Vector Search (RAG)</span>
-                <span class="ml-auto text-emerald-600 font-semibold">✓</span>
-              </div>
-              <div class="w-0.5 h-3 bg-slate-200 ml-2.5"></div>
-              <div class="flex items-center gap-2 text-xs">
-                <div class="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold">2</div>
-                <span class="text-slate-600">LLM Generation</span>
-                <span class="ml-auto text-indigo-600 font-semibold">✓</span>
-              </div>
-              <div class="w-0.5 h-3 bg-slate-200 ml-2.5"></div>
-              <div class="flex items-center gap-2 text-xs">
-                <div class="w-5 h-5 rounded-full bg-slate-200 text-slate-400 flex items-center justify-center text-xs font-bold">3</div>
-                <span class="text-slate-400">Human Review</span>
-                <span class="ml-auto text-slate-300 font-semibold">–</span>
+        <div class="bg-[#0F172A] rounded-2xl border border-slate-800 p-5">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Processing Pipeline</h3>
+          <div class="space-y-3">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center"><span class="text-emerald-400 text-xs font-bold">1</span></div>
+              <div>
+                <div class="text-xs font-semibold text-white">RAG Search</div>
+                <div class="text-[10px] text-slate-500">FAISS vector similarity</div>
               </div>
             </div>
-          </div>
-          <div class="border-t border-slate-100 pt-4">
-            <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Session Stats</div>
-            <div class="space-y-2">
-              <div class="flex justify-between text-xs"><span class="text-slate-500">Avg Confidence</span><span class="font-semibold text-slate-700">87%</span></div>
-              <div class="flex justify-between text-xs"><span class="text-slate-500">Response Time</span><span class="font-semibold text-slate-700">1.2s</span></div>
-              <div class="flex justify-between text-xs"><span class="text-slate-500">RAG Sources</span><span class="font-semibold text-slate-700">3 chunks</span></div>
-              <div class="flex justify-between text-xs"><span class="text-slate-500">Tokens Used</span><span class="font-semibold text-slate-700">842</span></div>
+            <div class="w-px h-3 bg-slate-700 ml-4"></div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-indigo-500/15 flex items-center justify-center"><span class="text-indigo-400 text-xs font-bold">2</span></div>
+              <div>
+                <div class="text-xs font-semibold text-white">LLM Generation</div>
+                <div class="text-[10px] text-slate-500">Gemini / Qwen fallback</div>
+              </div>
             </div>
-          </div>
-          <div class="border-t border-slate-100 pt-4">
-            <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Quick Actions</div>
-            <div class="space-y-2">
-              <button class="w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-slate-50 border border-slate-200 text-slate-600 transition">Force RAG Retry</button>
-              <button class="w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-slate-50 border border-slate-200 text-slate-600 transition">Inject System Prompt</button>
-              <button class="w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-rose-50 border border-rose-200 text-rose-600 transition">Escalate to Agent</button>
+            <div class="w-px h-3 bg-slate-700 ml-4"></div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center"><span class="text-amber-400 text-xs font-bold">3</span></div>
+              <div>
+                <div class="text-xs font-semibold text-white">Human Escalation</div>
+                <div class="text-[10px] text-slate-500">Support agent queue</div>
+              </div>
             </div>
           </div>
         </div>
@@ -200,94 +145,153 @@ interface ConversationThread {
     </div>
   `
 })
-export class ChatComponent {
-  @ViewChild('messagesContainer') messagesContainer!: ElementRef;
-  draftMessage = '';
-  isTyping = signal(false);
+export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
+  @ViewChild('messagesContainer') private messagesContainer!: ElementRef;
 
-  threads: ConversationThread[] = [
-    { id: 'TKT-0091', userId: 'user_83xa', status: 'active', lastMessage: 'How do I reset my 2FA?', time: '2m', unread: 2 },
-    { id: 'TKT-0090', userId: 'user_12bc', status: 'active', lastMessage: 'Incorrect VAT calculations', time: '8m', unread: 0 },
-    { id: 'TKT-0089', userId: 'user_55de', status: 'escalated', lastMessage: 'CSV import failing 500 error', time: '15m', unread: 1 },
-    { id: 'TKT-0088', userId: 'user_77fg', status: 'resolved', lastMessage: 'Data migration from Salesforce', time: '23m', unread: 0 },
-    { id: 'TKT-0087', userId: 'user_99hi', status: 'resolved', lastMessage: 'RBAC setup for my team', time: '31m', unread: 0 },
-  ];
-  activeThread = signal<ConversationThread | null>(this.threads[0]);
+  messages = signal<ChatMsg[]>([]);
+  newMessage = '';
+  isSending = signal(false);
+  private shouldScroll = false;
+  private wsSub?: Subscription;
 
-  messages: ChatMessage[] = [
-    {
-      id: '1', role: 'system', content: 'Conversation started · 2 min ago',
-      timestamp: '19:07'
-    },
-    {
-      id: '2', role: 'user', content: 'How do I reset my 2FA authenticator app without losing access to my account?',
-      timestamp: '19:07'
-    },
-    {
-      id: '3', role: 'rag', content: 'To reset your 2FA authenticator without losing access, please follow these steps:\n\n1. Log in using a backup code from your saved recovery codes.\n2. Navigate to Settings → Security → Two-Factor Authentication.\n3. Click "Reset Authenticator" and scan the new QR code with your preferred app.\n\nIf you do not have backup codes, you will need to contact support for identity verification.',
-      timestamp: '19:07', processor: 'RAG', confidence: 94,
-      sources: ['security-guide.md', 'faq-2fa.md', 'account-recovery.md']
-    },
-    {
-      id: '4', role: 'user', content: 'I don\'t have my backup codes, what can I do?',
-      timestamp: '19:08'
-    },
-    {
-      id: '5', role: 'ai', content: 'If you\'ve lost both your authenticator app and backup codes, our support team can verify your identity through an alternative method. This typically involves confirming your billing address, last 4 digits of payment method, and recent login timestamps. Please use the "Contact Human Support" button below to initiate this process.',
-      timestamp: '19:08', processor: 'AI Model', confidence: 71,
-      sources: ['identity-verification.md']
-    },
+  quickQuestions = [
+    'Plafond soins dentaires ?',
+    'Delai de remboursement ?',
+    'Prime de naissance ?',
+    'Prise en charge urgence ?',
   ];
 
-  sendMessage() {
-    if (!this.draftMessage.trim()) return;
+  constructor(
+    private wsService: WebSocketService,
+    private authService: AuthService,
+    private ticketService: TicketService
+  ) {}
 
-    this.messages.push({
-      id: Date.now().toString(),
-      role: 'user',
-      content: this.draftMessage.trim(),
-      timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  ngOnInit(): void {
+    // Listen for chat messages from WebSocket
+    this.wsSub = this.wsService.getMessages().subscribe(msg => {
+      if (msg.type === 'CHAT_RESPONSE') {
+        this.handleWsResponse(msg.payload);
+      }
     });
-    this.draftMessage = '';
-    this.isTyping.set(true);
+  }
 
+  ngAfterViewChecked(): void {
+    if (this.shouldScroll) {
+      this.scrollToBottom();
+      this.shouldScroll = false;
+    }
+  }
+
+  sendQuickQuestion(q: string): void {
+    this.newMessage = q;
+    this.sendMessage();
+  }
+
+  onEnter(event: Event): void {
+    event.preventDefault();
+    this.sendMessage();
+  }
+
+  sendMessage(): void {
+    const content = this.newMessage.trim();
+    if (!content || this.isSending()) return;
+
+    // Add user message
+    const userMsg: ChatMsg = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content,
+      timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    };
+    this.messages.update(msgs => [...msgs, userMsg]);
+    this.newMessage = '';
+    this.shouldScroll = true;
+    this.isSending.set(true);
+
+    // Send via WebSocket
+    this.wsService.sendMessage({
+      type: 'CHAT_QUERY',
+      payload: {
+        query: content,
+        matricule: this.authService.getCurrentUser()?.matricule || ''
+      }
+    });
+
+    // Simulate AI response (since backend chat endpoint uses the LangGraph agent)
+    // In production, this would come via WebSocket CHAT_RESPONSE event
     setTimeout(() => {
-      this.isTyping.set(false);
-      this.messages.push({
-        id: (Date.now() + 1).toString(),
-        role: 'rag',
-        content: 'I found relevant documentation for your query. Let me retrieve the most pertinent information from our knowledge base...',
-        timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-        processor: 'RAG',
-        confidence: 82,
-        sources: ['knowledge-base/general.md']
-      });
-    }, 1500);
+      const assistantMsg: ChatMsg = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: this.getSimulatedResponse(content),
+        timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        processor: this.getProcessor(content),
+      };
+      this.messages.update(msgs => [...msgs, assistantMsg]);
+      this.shouldScroll = true;
+      this.isSending.set(false);
+    }, 1500 + Math.random() * 1500);
   }
 
-  getProcessorIcon(p?: string) {
-    if (p === 'RAG') return 'R';
-    if (p === 'AI Model') return 'AI';
-    return '!';
+  clearChat(): void {
+    this.messages.set([]);
   }
-  getProcessorIconClass(p?: string) {
-    if (p === 'RAG') return 'bg-emerald-100 text-emerald-700';
-    if (p === 'AI Model') return 'bg-indigo-100 text-indigo-700';
-    return 'bg-rose-100 text-rose-700';
+
+  getProcessorBadge(processor: string): string {
+    const base = 'text-[10px] font-semibold px-2 py-0.5 rounded-md ';
+    if (processor === 'RAG') return base + 'bg-emerald-500/10 text-emerald-400';
+    if (processor === 'AI Model') return base + 'bg-indigo-500/10 text-indigo-400';
+    return base + 'bg-amber-500/10 text-amber-400';
   }
-  getProcessorBadgeClass(p?: string) {
-    if (p === 'RAG') return 'bg-emerald-100 text-emerald-700';
-    if (p === 'AI Model') return 'bg-indigo-100 text-indigo-700';
-    return 'bg-rose-100 text-rose-700';
+
+  private handleWsResponse(payload: any): void {
+    const msg: ChatMsg = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: payload.content || payload.text || '',
+      timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      processor: payload.processor || 'RAG',
+    };
+    this.messages.update(msgs => [...msgs, msg]);
+    this.shouldScroll = true;
+    this.isSending.set(false);
   }
-  getMessageBubbleClass(p?: string) {
-    if (p === 'RAG') return 'bg-white border border-emerald-100 text-slate-700';
-    if (p === 'AI Model') return 'bg-white border border-indigo-100 text-slate-700';
-    return 'bg-white border border-rose-100 text-slate-700';
+
+  private getSimulatedResponse(query: string): string {
+    const q = query.toLowerCase();
+    if (q.includes('dentaire') || q.includes('dental')) {
+      return 'Selon l\'Article 4 de la convention, le plafond annuel pour les soins dentaires est de 600 TND par beneficiaire. Les protheses dentaires sont couvertes a 70% dans la limite de ce plafond. Les soins orthodontiques pour les enfants de moins de 16 ans beneficient d\'un plafond supplementaire de 400 TND.';
+    }
+    if (q.includes('remboursement') || q.includes('delai')) {
+      return 'Les remboursements sont traites sous 48h ouvrees pour les feuilles de soins electroniques (FSE). Les feuilles papier peuvent prendre jusqu\'a 15 jours ouvres. Les virements sont effectues sur le RIB enregistre dans votre espace.';
+    }
+    if (q.includes('naissance') || q.includes('prime')) {
+      return 'La prime de naissance est de 300 TND par enfant, versee sur presentation de l\'acte de naissance dans un delai de 30 jours suivant la naissance. En cas de naissances multiples, la prime est versee pour chaque enfant.';
+    }
+    if (q.includes('urgence')) {
+      return 'En cas d\'urgence, rendez-vous aux services d\'urgence les plus proches. Les frais seront pris en charge a 100% sur presentation de votre carte d\'adherent. Le numero d\'urgence I-Way est le 71 800 800.';
+    }
+    if (q.includes('humain') || q.includes('agent') || q.includes('parler')) {
+      return 'Je transfère votre demande a un agent humain. Un ticket d\'escalation a ete cree. Position dans la file: 2. Temps d\'attente estime: 5 minutes.';
+    }
+    return 'Je recherche dans la base de connaissances I-Way pour repondre a votre question. D\'apres les informations disponibles, je vous recommande de consulter votre espace adherent ou de contacter notre service client au 71 800 800 pour une assistance personnalisee.';
   }
-  getThreadStatusClass(status: string) {
-    if (status === 'active') return 'bg-emerald-100 text-emerald-700';
-    if (status === 'escalated') return 'bg-rose-100 text-rose-700';
-    return 'bg-slate-100 text-slate-500';
+
+  private getProcessor(query: string): string {
+    const q = query.toLowerCase();
+    if (q.includes('humain') || q.includes('agent')) return 'Human Escalation';
+    if (q.includes('dentaire') || q.includes('remboursement') || q.includes('naissance') || q.includes('urgence') || q.includes('plafond')) return 'RAG';
+    return 'AI Model';
+  }
+
+  private scrollToBottom(): void {
+    try {
+      this.messagesContainer.nativeElement.scrollTop = this.messagesContainer.nativeElement.scrollHeight;
+    } catch {}
+  }
+
+  ngOnDestroy(): void {
+    this.wsSub?.unsubscribe();
   }
 }

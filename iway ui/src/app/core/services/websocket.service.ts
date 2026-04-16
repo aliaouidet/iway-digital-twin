@@ -1,7 +1,9 @@
-import { Injectable } from '@angular/core';
+import { Injectable, OnDestroy } from '@angular/core';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { Observable, of } from 'rxjs';
-import { catchError, retry } from 'rxjs/operators';
+import { Observable, Subject, EMPTY, timer } from 'rxjs';
+import { catchError, filter, map, retry, share, switchMap, takeUntil } from 'rxjs/operators';
+import { environment } from '../../../environments/environment';
+import { RealtimeMetricUpdate } from '../../shared/models';
 
 export interface WsMessage {
   type: string;
@@ -9,34 +11,82 @@ export interface WsMessage {
 }
 
 @Injectable({ providedIn: 'root' })
-export class WebSocketService {
-  private socket$!: WebSocketSubject<WsMessage>;
-  private readonly WS_ENDPOINT = 'ws://localhost:3000/ws';
+export class WebSocketService implements OnDestroy {
+  private socket$: WebSocketSubject<WsMessage> | null = null;
+  private destroy$ = new Subject<void>();
+  private messages$ = new Subject<WsMessage>();
 
-  public connect(): void {
-    if (!this.socket$ || this.socket$.closed) {
-      this.socket$ = webSocket(this.WS_ENDPOINT);
-      
-      this.socket$.pipe(
-        retry({ count: 5, delay: 2000 }),
-        catchError(err => {
-          console.error('WebSocket Error', err);
-          return of({ type: 'ERROR', payload: err });
-        })
-      ).subscribe();
+  connect(): void {
+    if (this.socket$ && !this.socket$.closed) {
+      return;
     }
+
+    this.socket$ = webSocket<WsMessage>({
+      url: environment.wsUrl,
+      openObserver: {
+        next: () => console.log('[WebSocket] Connected to', environment.wsUrl)
+      },
+      closeObserver: {
+        next: () => console.log('[WebSocket] Connection closed')
+      }
+    });
+
+    this.socket$.pipe(
+      retry({ count: 10, delay: (error, retryCount) => {
+        const delayMs = Math.min(1000 * Math.pow(2, retryCount), 30000);
+        console.log(`[WebSocket] Reconnecting in ${delayMs}ms (attempt ${retryCount})...`);
+        return timer(delayMs);
+      }}),
+      catchError(err => {
+        console.error('[WebSocket] Fatal error:', err);
+        return EMPTY;
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (msg) => this.messages$.next(msg),
+      error: (err) => console.error('[WebSocket] Stream error:', err),
+    });
+
+    // Send periodic pings
+    timer(30000, 30000).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe(() => this.sendMessage({ type: 'PING', payload: null }));
   }
 
-  public getMessages(): Observable<WsMessage> {
-    if (!this.socket$) {
-      this.connect();
-    }
-    return this.socket$.asObservable();
-  }
-
-  public sendMessage(msg: WsMessage): void {
+  disconnect(): void {
     if (this.socket$) {
+      this.socket$.complete();
+      this.socket$ = null;
+    }
+  }
+
+  getMessages(): Observable<WsMessage> {
+    return this.messages$.asObservable();
+  }
+
+  getMetricUpdates(): Observable<RealtimeMetricUpdate> {
+    return this.messages$.pipe(
+      filter(msg => msg.type === 'METRIC_UPDATE'),
+      map(msg => msg.payload as RealtimeMetricUpdate)
+    );
+  }
+
+  getTicketUpdates(): Observable<any> {
+    return this.messages$.pipe(
+      filter(msg => msg.type === 'TICKET_UPDATE'),
+      map(msg => msg.payload)
+    );
+  }
+
+  sendMessage(msg: WsMessage): void {
+    if (this.socket$ && !this.socket$.closed) {
       this.socket$.next(msg);
     }
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.disconnect();
   }
 }

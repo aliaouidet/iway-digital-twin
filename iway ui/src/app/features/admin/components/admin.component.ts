@@ -1,192 +1,182 @@
-import { Component, signal } from '@angular/core';
+import { Component, OnInit, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { AdminService } from '../../../core/services/admin.service';
+import { SystemConfig } from '../../../shared/models';
 
 @Component({
   selector: 'app-admin',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-8 animate-in fade-in max-w-5xl mx-auto">
-      <div>
-        <h1 class="text-3xl font-bold text-slate-800 tracking-tight">System Configuration</h1>
-        <p class="text-slate-500 mt-1">Manage global system parameters, RAG thresholds, and integrations.</p>
+    <div class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">System Administration</h1>
+          <p class="text-slate-500 mt-1 text-sm">Configure RAG engine, LLM parameters, and system behavior</p>
+        </div>
+        <button (click)="saveConfig()" [disabled]="isSaving()"
+          class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 rounded-xl text-xs font-semibold text-white transition-colors cursor-pointer flex items-center gap-1.5">
+          <svg *ngIf="!isSaving()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          <svg *ngIf="isSaving()" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+          {{isSaving() ? 'Saving...' : 'Save Changes'}}
+        </button>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        <!-- Sidebar Navigation -->
-        <div class="col-span-1 space-y-2">
-           <button *ngFor="let tab of tabs" (click)="activeTab.set(tab.id)"
-                   [class]="activeTab() === tab.id ? 'w-full text-left px-5 py-4 rounded-xl bg-white border-l-4 border-indigo-600 shadow-sm font-semibold text-indigo-700 transition-all' : 'w-full text-left px-5 py-4 rounded-xl bg-transparent border-l-4 border-transparent hover:bg-white/60 font-medium text-slate-500 transition-all'">
-             <div class="flex items-center gap-3">
-               <span class="text-lg" [innerHTML]="tab.icon"></span>
-               {{tab.label}}
-             </div>
-           </button>
+      <!-- Success Toast -->
+      <div *ngIf="showSuccess()" class="px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Configuration saved successfully.
+      </div>
+
+      <!-- Loading -->
+      <div *ngIf="isLoading()" class="space-y-6">
+        <div *ngFor="let _ of [1,2,3]" class="bg-slate-800/50 rounded-2xl border border-slate-700/50 p-6 animate-pulse h-48"></div>
+      </div>
+
+      <!-- Tabs -->
+      <div *ngIf="!isLoading() && config()" class="flex gap-2 border-b border-slate-800 pb-0">
+        <button *ngFor="let tab of tabs" (click)="activeTab.set(tab.id)"
+          [class]="activeTab() === tab.id
+            ? 'px-5 py-3 text-sm font-semibold text-indigo-400 border-b-2 border-indigo-400 -mb-px cursor-pointer transition-all'
+            : 'px-5 py-3 text-sm font-semibold text-slate-500 hover:text-slate-300 border-b-2 border-transparent -mb-px cursor-pointer transition-all'">
+          {{tab.label}}
+        </button>
+      </div>
+
+      <!-- RAG Config -->
+      <div *ngIf="!isLoading() && config() && activeTab() === 'rag'" class="bg-[#0F172A] p-8 rounded-2xl border border-slate-800 space-y-8">
+        <h3 class="text-base font-bold text-white" style="font-family: 'Figtree', sans-serif;">RAG Engine Settings</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Chunking Strategy</label>
+            <select [(ngModel)]="config()!.rag.chunking_strategy"
+              class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer appearance-none">
+              <option value="semantic">Semantic</option>
+              <option value="fixed">Fixed Size</option>
+              <option value="recursive">Recursive</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Top-K Results</label>
+            <input [(ngModel)]="config()!.rag.top_k" type="number" min="1" max="10"
+              class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Similarity Threshold ({{config()!.rag.similarity_threshold}}%)</label>
+            <input [(ngModel)]="config()!.rag.similarity_threshold" type="range" min="0" max="100" step="1"
+              class="w-full accent-indigo-500 cursor-pointer" />
+          </div>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Enable AI Fallback</label>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" [(ngModel)]="config()!.rag.enable_ai_fallback" class="sr-only peer">
+                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+              </label>
+            </div>
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Auto-Escalate Negative Sentiment</label>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" [(ngModel)]="config()!.rag.auto_escalate_negative_sentiment" class="sr-only peer">
+                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+              </label>
+            </div>
+          </div>
         </div>
+      </div>
 
-        <!-- Settings Panels -->
-        <div class="col-span-1 lg:col-span-2">
-           
-           <!-- RAG Tuner Panel -->
-           <div *ngIf="activeTab() === 'rag'" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-             <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <h3 class="text-lg font-bold text-slate-800">RAG Engine Configuration</h3>
-                  <p class="text-sm text-slate-500">Tune the retrieval augmented generation system.</p>
-                </div>
-                <button class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm">Save Changes</button>
-             </div>
-             
-             <div class="p-6 space-y-6">
-                <!-- Chunking Strategy -->
-                <div>
-                  <label class="block text-sm font-semibold text-slate-700 mb-1">Document Chunking Strategy</label>
-                  <p class="text-xs text-slate-500 mb-3">Define how knowledge base files are split for vector embedding.</p>
-                  <select class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none transition">
-                    <option>Semantic Splitting (Recommended)</option>
-                    <option>Fixed Size Overlap (500 tokens)</option>
-                    <option>Markdown Header Splitting</option>
-                  </select>
-                </div>
+      <!-- LLM Config -->
+      <div *ngIf="!isLoading() && config() && activeTab() === 'llm'" class="bg-[#0F172A] p-8 rounded-2xl border border-slate-800 space-y-8">
+        <h3 class="text-base font-bold text-white" style="font-family: 'Figtree', sans-serif;">LLM Model Settings</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Primary Model</label>
+            <select [(ngModel)]="config()!.llm.primary_model"
+              class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer appearance-none">
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <option value="qwen3.5:9b">Qwen 3.5 9B (Local)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Temperature ({{config()!.llm.temperature}})</label>
+            <input [(ngModel)]="config()!.llm.temperature" type="range" min="0" max="1" step="0.05"
+              class="w-full accent-indigo-500 cursor-pointer" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">System Prompt</label>
+            <textarea [(ngModel)]="config()!.llm.system_prompt" rows="4"
+              class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all resize-none font-mono"></textarea>
+          </div>
+        </div>
+      </div>
 
-                <div class="grid grid-cols-2 gap-6">
-                   <!-- Top K -->
-                   <div>
-                     <label class="block text-sm font-semibold text-slate-700 mb-1">Retrieval (Top K)</label>
-                     <p class="text-xs text-slate-500 mb-3">Number of chunks to inject into prompt.</p>
-                     <input type="number" value="3" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none transition">
-                   </div>
-                   
-                   <!-- Similarity Threshold -->
-                   <div>
-                     <label class="block text-sm font-semibold text-slate-700 mb-1">Similarity Threshold (%)</label>
-                     <p class="text-xs text-slate-500 mb-3">Minimum cosine similarity required.</p>
-                     <input type="number" value="82" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none transition">
-                   </div>
-                </div>
-
-                <hr class="border-slate-100">
-
-                <!-- Escalation Policy -->
-                <div>
-                   <h4 class="text-sm font-semibold text-slate-800 mb-4">Fallback & Escalation Workflow</h4>
-                   
-                   <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-indigo-300 transition-colors">
-                     <input type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
-                     <div class="flex-1">
-                       <div class="text-sm font-semibold text-slate-700">Enable Generative AI Fallback</div>
-                       <div class="text-xs text-slate-500">If RAG fails to find highly similar chunks, allow the LLM to use its parametric knowledge with a strict system prompt.</div>
-                     </div>
-                   </label>
-                   
-                   <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 mt-3 hover:border-indigo-300 transition-colors cursor-pointer">
-                     <input type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
-                     <div class="flex-1">
-                       <div class="text-sm font-semibold text-slate-700">Auto-Escalate Negative Sentiment</div>
-                       <div class="text-xs text-slate-500">Route directly to human queue if user message sentiment score is severely negative.</div>
-                     </div>
-                   </label>
-                </div>
-             </div>
-           </div>
-
-           <!-- LLM Tuner Panel -->
-           <div *ngIf="activeTab() === 'llm'" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-             <!-- ... content for llm ... -->
-             <div class="px-6 py-5 border-b border-slate-100">
-                <h3 class="text-lg font-bold text-slate-800">Language Model Settings</h3>
-             </div>
-             <div class="p-6 space-y-6">
-                <div>
-                  <label class="block text-sm font-semibold text-slate-700 mb-1">Primary Model</label>
-                  <select class="w-full py-2.5 px-4 rounded-lg border border-slate-200 bg-slate-50 text-sm">
-                    <option>GPT-4o (OpenAI)</option>
-                    <option>Claude 3.5 Sonnet (Anthropic)</option>
-                    <option>Gemini 1.5 Pro (Google)</option>
-                  </select>
-                </div>
-                
-                <div>
-                   <label class="block text-sm font-semibold text-slate-700 mb-1 flex justify-between">
-                     System Prompt configuration
-                     <button class="text-xs text-indigo-600 hover:text-indigo-800 underline">View Variables</button>
-                   </label>
-                   <textarea rows="8" class="w-full p-4 text-sm font-mono bg-slate-900 leading-relaxed text-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-y">You are a highly capable AI Support Assistant for the I-Way platform.
-
-Rules:
-1. ONLY use information provided in the Context block.
-2. If the answer is not in the context, explicitly state "I don't have enough context, escalating to human."
-3. Maintain a professional, concise tone.
-
-Context: {{ "{{" }}rag_context{{ "}}" }}
-User: {{ "{{" }}user_query{{ "}}" }}
-</textarea>
-                </div>
-                
-                <div class="flex items-center gap-4">
-                  <div class="flex-1">
-                     <label class="block text-sm font-semibold text-slate-700 mb-1">Temperature</label>
-                     <input type="range" class="w-full accent-indigo-600" min="0" max="1" step="0.1" value="0.2">
-                  </div>
-                  <div class="w-16 text-center mt-6 text-sm font-bold text-indigo-600 bg-indigo-50 py-1 rounded">0.2</div>
-                </div>
-             </div>
-           </div>
-
-           <!-- Data Sources -->
-           <div *ngIf="activeTab() === 'data'" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-              <div class="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
-                 <h3 class="text-lg font-bold text-slate-800">Knowledge Integrations</h3>
-                 <button class="text-sm font-semibold text-indigo-600 hover:text-indigo-800">+ Add Source</button>
-              </div>
-              <div class="p-6">
-                 <div class="space-y-4">
-                   <!-- Source Item -->
-                   <div class="flex items-center justify-between p-4 border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors">
-                     <div class="flex items-center gap-4">
-                       <div class="w-10 h-10 bg-[#FF9900]/10 text-[#FF9900] rounded-lg flex items-center justify-center font-bold text-xl">S3</div>
-                       <div>
-                         <div class="font-bold text-slate-800 text-sm">AWS S3 Bucket (Help Center)</div>
-                         <div class="text-xs text-slate-500 mt-0.5">Last synced: 2 hours ago • 14,021 documents</div>
-                       </div>
-                     </div>
-                     <div class="flex items-center gap-3">
-                       <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Active</span>
-                       <button class="p-2 hover:bg-slate-100 rounded text-slate-400">•••</button>
-                     </div>
-                   </div>
-                   
-                   <div class="flex items-center justify-between p-4 border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors">
-                     <div class="flex items-center gap-4">
-                       <div class="w-10 h-10 bg-blue-500/10 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xl">C</div>
-                       <div>
-                         <div class="font-bold text-slate-800 text-sm">Confluence Space (Internal)</div>
-                         <div class="text-xs text-slate-500 mt-0.5">Last synced: 1 day ago • 3,401 documents</div>
-                       </div>
-                     </div>
-                     <div class="flex items-center gap-3">
-                       <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Active</span>
-                       <button class="p-2 hover:bg-slate-100 rounded text-slate-400">•••</button>
-                     </div>
-                   </div>
-                 </div>
-              </div>
-           </div>
-
+      <!-- Retry Config -->
+      <div *ngIf="!isLoading() && config() && activeTab() === 'retry'" class="bg-[#0F172A] p-8 rounded-2xl border border-slate-800 space-y-8">
+        <h3 class="text-base font-bold text-white" style="font-family: 'Figtree', sans-serif;">Error Handling & Retry</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Max Retries</label>
+            <input [(ngModel)]="config()!.retry.max_retries" type="number" min="0" max="10"
+              class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Backoff Delay (seconds)</label>
+            <input [(ngModel)]="config()!.retry.backoff_seconds" type="number" min="1" max="30"
+              class="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all" />
+          </div>
         </div>
       </div>
     </div>
   `
 })
-export class AdminComponent {
-  tabs = [
-    { id: 'rag', label: 'RAG Pipeline', icon: '🧠' },
-    { id: 'llm', label: 'LLM Tuner', icon: '🤖' },
-    { id: 'data', label: 'Data Sources', icon: '📚' },
-    { id: 'api', label: 'API Keys', icon: '🔑' }
-  ];
-  
+export class AdminComponent implements OnInit {
+  config = signal<SystemConfig | null>(null);
+  isLoading = signal(true);
+  isSaving = signal(false);
+  showSuccess = signal(false);
   activeTab = signal('rag');
+
+  tabs = [
+    { id: 'rag', label: 'RAG Engine' },
+    { id: 'llm', label: 'LLM Settings' },
+    { id: 'retry', label: 'Error Handling' },
+  ];
+
+  constructor(private adminService: AdminService) {}
+
+  ngOnInit(): void {
+    this.loadConfig();
+  }
+
+  private loadConfig(): void {
+    this.isLoading.set(true);
+    this.adminService.getConfig().subscribe({
+      next: (data) => {
+        this.config.set({ ...data });
+        this.isLoading.set(false);
+      },
+      error: () => this.isLoading.set(false)
+    });
+  }
+
+  saveConfig(): void {
+    const current = this.config();
+    if (!current) return;
+
+    this.isSaving.set(true);
+    this.showSuccess.set(false);
+
+    this.adminService.updateConfig(current).subscribe({
+      next: (resp) => {
+        this.config.set(resp.config);
+        this.isSaving.set(false);
+        this.showSuccess.set(true);
+        setTimeout(() => this.showSuccess.set(false), 3000);
+      },
+      error: () => this.isSaving.set(false)
+    });
+  }
 }
