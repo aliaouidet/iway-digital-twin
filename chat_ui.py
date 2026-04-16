@@ -296,11 +296,9 @@ for k, v in defaults.items():
 
 # ── Cached Agent (only loads model once) ──────────────────────
 
-@st.cache_resource(show_spinner="Loading AI model...")
+@st.cache_resource(show_spinner="Initializing AI agent...")
 def get_cached_agent():
-    """Build and cache the agent graph + pre-warm RAG model (called once)."""
-    import rag_engine
-    rag_engine.get_engine()  # Pre-load sentence-transformers model
+    """Build and cache the agent graph (RAG model loads lazily on first query)."""
     return build_agent_graph()
 
 
@@ -325,7 +323,7 @@ def do_login(matricule: str, password: str):
             st.session_state.tool_calls_count = 0
             st.session_state.turn_count = 0
             st.session_state.thread_id = f"{matricule}-{uuid.uuid4().hex[:8]}"
-            st.session_state.agent = get_cached_agent()
+            st.session_state.agent = None  # Agent built lazily
             st.rerun()
         else:
             st.sidebar.error(f"Login failed (HTTP {resp.status_code})")
@@ -653,7 +651,16 @@ for idx, msg in enumerate(st.session_state.messages):
 
 if st.session_state.streaming and st.session_state.messages:
     last_msg = st.session_state.messages[-1]
-    if isinstance(last_msg, HumanMessage):
+    if not isinstance(last_msg, HumanMessage):
+        # Edge case: streaming flag stuck but no pending user message — reset
+        st.session_state.streaming = False
+        st.rerun()
+    else:
+        # Lazy agent initialization (first message triggers model load)
+        if st.session_state.agent is None:
+            with st.spinner("Loading AI model (first time may take a minute)..."):
+                st.session_state.agent = get_cached_agent()
+
         config = {"configurable": {"thread_id": st.session_state.thread_id}}
         state = {
             "messages": [last_msg],
@@ -664,6 +671,7 @@ if st.session_state.streaming and st.session_state.messages:
         t_start = time.time()
         accumulated = ""
         had_error = False
+        turn_tools = 0
 
         with st.chat_message("assistant"):
             tool_status = st.empty()
@@ -677,6 +685,7 @@ if st.session_state.streaming and st.session_state.messages:
                         name = ev.get("name", "")
                         label = _TOOL_LABELS.get(name, f"\U0001f527 {name}\u2026")
                         tool_status.info(label)
+                        turn_tools += 1
 
                     elif kind == "on_tool_end":
                         tool_status.empty()
@@ -711,38 +720,40 @@ if st.session_state.streaming and st.session_state.messages:
 
         elapsed = time.time() - t_start
 
-        # Read final state from the checkpointer
+        # ── Update session state with results ──────────────────
         if not had_error:
+            # PRIMARY: Try to sync messages from the agent checkpointer
+            state_synced = False
             try:
                 final_state = st.session_state.agent.get_state(config)
                 result_messages = list(final_state.values["messages"])
 
-                # Fallback: if streaming didn't capture any tokens,
-                # extract the final AI response from the checkpointer
+                if len(result_messages) > len(st.session_state.messages):
+                    st.session_state.messages = result_messages
+                    while len(st.session_state.timestamps) < len(result_messages):
+                        st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
+                    state_synced = True
+
+                # Fallback display: if streaming didn't capture tokens
                 if not accumulated and result_messages:
                     for m in reversed(result_messages):
                         if isinstance(m, AIMessage) and m.content:
                             fallback_text = _extract_text(m.content)
                             if fallback_text:
+                                accumulated = fallback_text
                                 response_area.markdown(fallback_text)
                             break
+            except Exception as exc:
+                print(f"[chat_ui] Warning: get_state() failed: {exc}")
 
-                new_messages = result_messages[len(st.session_state.messages):]
-                turn_tools = sum(
-                    len(m.tool_calls)
-                    for m in new_messages
-                    if isinstance(m, AIMessage) and hasattr(m, "tool_calls") and m.tool_calls
-                )
+            # FALLBACK: If checkpointer sync failed, manually append the AI response
+            if not state_synced and accumulated:
+                st.session_state.messages.append(AIMessage(content=accumulated))
+                st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
 
-                st.session_state.messages = result_messages
-                while len(st.session_state.timestamps) < len(result_messages):
-                    st.session_state.timestamps.append(datetime.now().strftime("%H:%M:%S"))
-
-                st.session_state.turn_count += 1
-                st.session_state.tool_calls_count += turn_tools
-                st.session_state.response_times.append(elapsed)
-            except Exception:
-                pass  # State update failed; content was already displayed
+            st.session_state.turn_count += 1
+            st.session_state.tool_calls_count += turn_tools
+            st.session_state.response_times.append(elapsed)
 
         st.session_state.streaming = False
         st.rerun()
