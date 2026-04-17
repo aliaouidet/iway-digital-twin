@@ -140,10 +140,15 @@ interface ChatMessage {
           </div>
           <div class="px-4 py-3 rounded-2xl rounded-bl-md"
             [class]="isDark() ? 'bg-[#0F172A] border border-slate-800' : 'bg-white border border-slate-200 shadow-sm'">
-            <div class="flex gap-1">
-              <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 0ms"></span>
-              <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 150ms"></span>
-              <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 300ms"></span>
+            <div class="flex items-center gap-3">
+              <div class="flex gap-1">
+                <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 0ms"></span>
+                <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 150ms"></span>
+                <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 300ms"></span>
+              </div>
+              <span *ngIf="thinkingStatus()" class="text-[10px] font-medium animate-pulse" [class]="isDark() ? 'text-indigo-400/70' : 'text-indigo-500/70'">
+                {{thinkingStatus()}}
+              </span>
             </div>
           </div>
         </div>
@@ -177,6 +182,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   newMessage = '';
   isConnected = signal(false);
   isThinking = signal(false);
+  thinkingStatus = signal('');
   isHandoffActive = signal(false);
   agentName = signal('');
   inputDisabled = signal(false);
@@ -197,7 +203,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     private themeService: ThemeService,
     private http: HttpClient,
     private router: Router
-  ) {}
+  ) { }
 
   isDark = () => this.themeService.isDark();
   toggleTheme = () => this.themeService.toggleTheme();
@@ -211,7 +217,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   private createSession(): void {
-    this.http.post<{session_id: string}>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
+    this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
       next: (res) => {
         this.sessionId = res.session_id;
         this.connectWebSocket();
@@ -246,9 +252,11 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         break;
       case 'thinking':
         this.isThinking.set(true);
+        this.thinkingStatus.set(msg.status || '');
         break;
       case 'ai_token':
         this.isThinking.set(false);
+        this.thinkingStatus.set('');
         this.streamingContent += msg.token;
         const msgs = this.messages();
         const last = msgs[msgs.length - 1];
@@ -322,7 +330,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   private scrollToBottom(): void {
     try {
       this.messageContainer.nativeElement.scrollTop = this.messageContainer.nativeElement.scrollHeight;
-    } catch {}
+    } catch { }
   }
 
   ngOnDestroy(): void {

@@ -1,7 +1,12 @@
 """
-Chat Service — Per-session WebSocket handler with resilience patterns.
+Chat Service — Per-session WebSocket handler with LangGraph Agent + Resilience.
+
+Architecture:
+  PRIMARY PATH:  LangGraph Agent (Gemini/Ollama LLM + BotTools)
+  FALLBACK PATH: RAG-only similarity lookup (no LLM reasoning)
 
 Resilience features:
+- Agent initialization failure → graceful fallback to RAG-only
 - LLM timeout → auto-escalate to human agent
 - Circuit breaker → prevents cascading LLM/embedding failures
 - Agent disconnect → re-queues session for another agent
@@ -33,21 +38,126 @@ settings = get_settings()
 
 
 # ==============================================================
-# RAG-ENHANCED AI RESPONSE (replaces hardcoded responses)
+# LANGGRAPH AGENT (lazy-loaded to avoid startup failure)
+# ==============================================================
+
+_shared_agent = None
+_agent_available = False
+
+
+def _get_agent():
+    """Lazy-load the LangGraph agent. Returns None if unavailable."""
+    global _shared_agent, _agent_available
+    if _shared_agent is not None:
+        return _shared_agent
+    if not _agent_available and _shared_agent is None:
+        try:
+            from agent import build_agent_graph
+            _shared_agent = build_agent_graph()
+            _agent_available = True
+            logger.info("🤖 LangGraph Agent loaded successfully")
+        except Exception as e:
+            _agent_available = False
+            logger.warning(f"⚠️ LangGraph Agent unavailable (falling back to RAG-only): {e}")
+    return _shared_agent
+
+
+# ==============================================================
+# AGENTIC AI RESPONSE (Primary Path — LangGraph + Tools)
+# ==============================================================
+
+async def get_agent_response(query: str, session: dict, websocket: WebSocket) -> dict:
+    """
+    Generate a response using the full LangGraph agent with tool calling.
+    
+    Flow:
+    1. Build LangChain message history from session
+    2. Stream agent execution via astream_events
+    3. Send tool status and tokens to WebSocket in real-time
+    4. Return final response with metadata
+    """
+    from langchain_core.messages import HumanMessage, AIMessage
+
+    agent = _get_agent()
+    if agent is None:
+        return None  # Signal to caller to use fallback
+
+    # Convert session history to LangChain messages
+    lc_history = []
+    for h in session.get("history", []):
+        if h["role"] == "user":
+            lc_history.append(HumanMessage(content=h["content"]))
+        elif h["role"] == "assistant":
+            lc_history.append(AIMessage(content=h["content"]))
+    # The current message is already appended to history, so it's the last one
+    # We use it directly  
+    
+    initial_state = {
+        "messages": lc_history,
+        "matricule": session.get("user_matricule", "12345"),
+        "token": session.get("user_token", ""),
+    }
+    config = {"configurable": {"thread_id": f"ws-session-{session['id']}"}}
+
+    full_response = ""
+    tools_called = []
+
+    try:
+        async for event in agent.astream_events(initial_state, config=config, version="v1"):
+            kind = event["event"]
+
+            if kind == "on_chat_model_stream":
+                chunk = event["data"].get("chunk")
+                if chunk and hasattr(chunk, "content") and chunk.content:
+                    # Only stream final response tokens (not intermediate reasoning)
+                    # Check if we're in the final chatbot node
+                    if not (hasattr(chunk, "tool_calls") and chunk.tool_calls):
+                        full_response += chunk.content
+                        await websocket.send_json({"type": "ai_token", "token": chunk.content})
+
+            elif kind == "on_tool_start":
+                tool_name = event.get("name", "unknown")
+                tools_called.append(tool_name)
+                # Show user what tool is being called
+                tool_labels = {
+                    "search_knowledge_base": "🔍 Recherche dans la base de connaissances...",
+                    "get_personal_dossiers": "📋 Consultation de vos dossiers...",
+                    "escalate_to_human": "👤 Transfert vers un agent...",
+                    "analyze_medical_receipt": "🧾 Analyse de la facture médicale...",
+                }
+                status_text = tool_labels.get(tool_name, f"⚙️ {tool_name}...")
+                await websocket.send_json({"type": "thinking", "status": status_text})
+
+            elif kind == "on_tool_end":
+                pass  # Tool results are processed by the agent internally
+
+        if full_response.strip():
+            return {
+                "text": full_response.strip(),
+                "confidence": 90,  # Agent responses are generally high-confidence
+                "source": "langgraph_agent",
+                "tools_called": tools_called,
+                "degraded": False,
+            }
+        else:
+            return None  # Empty response — fall back
+
+    except Exception as e:
+        logger.error(f"❌ Agent execution failed: {e}")
+        llm_circuit.record_failure()
+        return None  # Signal fallback
+
+
+# ==============================================================
+# RAG-ONLY AI RESPONSE (Fallback Path — no LLM reasoning)
 # ==============================================================
 
 async def get_rag_ai_response(query: str) -> dict:
     """
-    Generate an AI response using the RAG pipeline with resilience.
-    
-    Flow:
-    1. Check embedding circuit breaker
-    2. Retrieve context from knowledge store (with timeout)
-    3. If high-confidence match → return it
-    4. If low confidence → trigger handoff
-    5. On any failure → graceful degradation
+    Generate an AI response using RAG similarity lookup only.
+    No LLM reasoning — just returns the closest knowledge base match.
+    Used as fallback when the LangGraph agent is unavailable.
     """
-    # --- Check circuit breakers ---
     if not llm_circuit.can_execute():
         logger.warning("🔌 LLM circuit OPEN — using fallback")
         return get_fallback_response("circuit_open")
@@ -57,11 +167,9 @@ async def get_rag_ai_response(query: str) -> dict:
         return get_fallback_response("embedding_failure")
 
     try:
-        # --- RAG Retrieval with timeout ---
         from backend.services.rag_service import retrieve_context
 
         async def _do_retrieval():
-            # Run CPU-bound embedding in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, retrieve_context, query)
 
@@ -74,12 +182,9 @@ async def get_rag_ai_response(query: str) -> dict:
         embedding_circuit.record_success()
 
         if results and results[0]["similarity"] >= settings.RAG_SIMILARITY_THRESHOLD:
-            # High-confidence RAG match
             top = results[0]
             confidence = int(top["similarity"] * 100)
             response_text = top["metadata"].get("reponse", top["chunk_text"])
-
-            # Mark source for dashboard tracking
             source_type = top["source_type"]
             is_hitl = source_type == "hitl_validated"
 
@@ -93,19 +198,12 @@ async def get_rag_ai_response(query: str) -> dict:
                 "degraded": False,
             }
         elif results:
-            # Low confidence — check if we should still return or escalate
             top = results[0]
             confidence = int(top["similarity"] * 100)
 
             if confidence < int(settings.CONFIDENCE_THRESHOLD * 100):
-                # Below threshold → trigger handoff
-                return {
-                    "text": None,
-                    "confidence": confidence,
-                    "degraded": False,
-                }
+                return {"text": None, "confidence": confidence, "degraded": False}
             else:
-                # Medium confidence — return with caveat
                 response_text = top["metadata"].get("reponse", top["chunk_text"])
                 llm_circuit.record_success()
                 return {
@@ -115,12 +213,7 @@ async def get_rag_ai_response(query: str) -> dict:
                     "degraded": False,
                 }
         else:
-            # No results at all
-            return {
-                "text": None,
-                "confidence": 0,
-                "degraded": False,
-            }
+            return {"text": None, "confidence": 0, "degraded": False}
 
     except TimeoutError:
         llm_circuit.record_failure()
@@ -134,7 +227,7 @@ async def get_rag_ai_response(query: str) -> dict:
 
 
 # ==============================================================
-# SIMULATED AI RESPONSE (kept as fallback when RAG store is empty)
+# SIMULATED AI RESPONSE (last resort — no RAG store)
 # ==============================================================
 
 def get_simulated_ai_response(query: str) -> dict:
@@ -166,11 +259,10 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
     """
     Per-session WebSocket handler with full resilience.
     
-    Resilience behaviors:
-    - LLM/embedding timeout → auto-escalate with friendly message
-    - Circuit breaker open → instant fallback, no waiting
-    - Agent disconnect → re-queue session
-    - User disconnect → preserve state for reconnection
+    AI Response Strategy (ordered by priority):
+    1. LangGraph Agent (tools + LLM reasoning) — primary
+    2. RAG-only similarity lookup — fallback if agent fails
+    3. Simulated hardcoded responses — last resort if RAG store is empty
     """
     session = sessions_store.get(session_id)
     if not session:
@@ -206,17 +298,16 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                 session["history"].append(user_msg)
 
                 if session["status"] == "agent_connected":
-                    # Relay to agent
+                    # Relay to human agent
                     agent_ws = session.get("agent_ws")
                     if agent_ws:
                         try:
                             await agent_ws.send_json({"type": "user_message", "content": content, "timestamp": user_msg["timestamp"]})
                         except Exception:
-                            # Agent WS broken — re-queue
                             handle_agent_disconnect(session, sessions_store)
                             await websocket.send_json({"type": "handoff_started", "reason": "Agent disconnected — re-queued"})
                 else:
-                    # === AI RESPONSE FLOW WITH RESILIENCE + TRACING ===
+                    # === AI RESPONSE FLOW ===
                     await websocket.send_json({"type": "thinking"})
 
                     # --- Start trace ---
@@ -228,27 +319,77 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     span_recv = trace.start_span("RECEIVED", message_length=len(content))
                     span_recv.finish()
 
-                    # Use RAG pipeline (with circuit breaker + timeout)
-                    from backend.services.rag_service import knowledge_store
-                    if knowledge_store.count > 0:
-                        span_rag = trace.start_span("RAG_SEARCH", store_count=knowledge_store.count)
-                        ai_result = await get_rag_ai_response(content)
-                        span_rag.finish(
-                            similarity=ai_result.get("similarity"),
-                            source=ai_result.get("source"),
-                            degraded=ai_result.get("degraded", False),
-                        )
-                    else:
-                        span_sim = trace.start_span("SIMULATED_RESPONSE")
-                        await asyncio.sleep(1.0 + random.random())
-                        ai_result = get_simulated_ai_response(content)
-                        span_sim.finish()
+                    ai_result = None
+
+                    # ── TIER 1: LangGraph Agent (primary) ──
+                    if llm_circuit.can_execute():
+                        span_agent = trace.start_span("AGENT_EXECUTION")
+                        try:
+                            ai_result = await asyncio.wait_for(
+                                get_agent_response(content, session, websocket),
+                                timeout=settings.LLM_TIMEOUT_SECONDS + 10  # Agent gets extra time for tool calls
+                            )
+                            if ai_result:
+                                span_agent.finish(
+                                    tools=ai_result.get("tools_called", []),
+                                    source="langgraph_agent",
+                                )
+                                llm_circuit.record_success()
+                            else:
+                                span_agent.finish(status="agent_unavailable")
+                        except asyncio.TimeoutError:
+                            span_agent.finish(status="timeout")
+                            llm_circuit.record_failure()
+                            logger.warning("⏰ Agent timed out — falling back to RAG")
+                        except Exception as e:
+                            span_agent.finish(status="error", error=str(e))
+                            logger.warning(f"⚠️ Agent error: {e} — falling back to RAG")
+
+                    # ── TIER 2: RAG-only fallback ──
+                    if ai_result is None:
+                        from backend.services.rag_service import knowledge_store
+                        if knowledge_store.count > 0:
+                            span_rag = trace.start_span("RAG_FALLBACK", store_count=knowledge_store.count)
+                            ai_result = await get_rag_ai_response(content)
+                            span_rag.finish(
+                                similarity=ai_result.get("similarity"),
+                                source=ai_result.get("source"),
+                                degraded=ai_result.get("degraded", False),
+                            )
+                        else:
+                            # ── TIER 3: Simulated response (no RAG store) ──
+                            span_sim = trace.start_span("SIMULATED_RESPONSE")
+                            await asyncio.sleep(0.5 + random.random() * 0.5)
+                            ai_result = get_simulated_ai_response(content)
+                            span_sim.finish()
 
                     # --- Evaluate & respond ---
-                    span_eval = trace.start_span("LLM_EVAL", confidence=ai_result.get("confidence"))
+                    span_eval = trace.start_span("EVAL", confidence=ai_result.get("confidence"))
 
-                    # --- Handle degraded responses (timeout/circuit open) ---
-                    if ai_result.get("degraded"):
+                    # Handle agent-streamed responses (already sent tokens)
+                    if ai_result.get("source") == "langgraph_agent":
+                        span_eval.finish(status="agent_resolved")
+                        await websocket.send_json({
+                            "type": "ai_done",
+                            "confidence": ai_result["confidence"],
+                            "source": "langgraph_agent",
+                            "tools_called": ai_result.get("tools_called", []),
+                        })
+                        session["history"].append({
+                            "role": "assistant",
+                            "content": ai_result["text"],
+                            "timestamp": datetime.now().isoformat(),
+                            "confidence": ai_result["confidence"],
+                            "source": "langgraph_agent",
+                        })
+                        trace.finish(
+                            "AGENT_RESOLVED",
+                            confidence=ai_result["confidence"],
+                            source_type="langgraph_agent",
+                        )
+
+                    # Handle degraded responses (timeout/circuit open)
+                    elif ai_result.get("degraded"):
                         span_eval.finish(status="degraded", failure_type=ai_result.get("failure_type"))
                         trace.finish("DEGRADED", confidence=0)
 
@@ -276,6 +417,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             }
                         })
 
+                    # Handle low confidence → escalate
                     elif ai_result["confidence"] < 30 or ai_result["text"] is None:
                         span_eval.finish(status="low_confidence")
                         trace.finish("HUMAN_ESCALATED", confidence=ai_result["confidence"])
@@ -298,10 +440,11 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "created_at": session["created_at"],
                             }
                         })
+
+                    # Handle RAG/simulated responses (need to stream tokens)
                     else:
                         span_eval.finish(status="high_confidence")
 
-                        # Stream AI response token by token
                         span_stream = trace.start_span("RESPONSE", confidence=ai_result["confidence"])
                         response_text = ai_result["text"]
                         words = response_text.split(" ")
@@ -375,7 +518,6 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
         if is_agent:
             result = handle_agent_disconnect(session, sessions_store)
             if result == "re_queued":
-                # Notify user that agent disconnected
                 user_ws = session.get("user_ws")
                 if user_ws:
                     try:
@@ -385,7 +527,6 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         })
                     except Exception:
                         pass
-                # Broadcast re-queue to agent dashboard
                 await ws_manager.broadcast({
                     "type": "NEW_ESCALATION",
                     "payload": {

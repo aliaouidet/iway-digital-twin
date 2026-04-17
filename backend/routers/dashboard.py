@@ -33,6 +33,14 @@ SYSTEM_LOGS = [
     {"id": "L006", "timestamp": "2026-04-13 19:02:18", "user_id": "99999", "query": "Erreur de connexion au portail prestataire", "top_similarity": 0.29, "chunks_retrieved": 1, "gen_time_ms": 3100, "tokens_used": 2102, "outcome": "ERROR", "model": "gemini-2.5-flash", "confidence": 15},
     {"id": "L007", "timestamp": "2026-04-13 19:01:05", "user_id": "12345", "query": "Quel est le plafond pour les soins dentaires ?", "top_similarity": 0.92, "chunks_retrieved": 3, "gen_time_ms": 690, "tokens_used": 780, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 92},
     {"id": "L008", "timestamp": "2026-04-13 19:00:22", "user_id": "12345", "query": "Quelle est la prime de naissance ?", "top_similarity": 0.91, "chunks_retrieved": 3, "gen_time_ms": 870, "tokens_used": 910, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 91},
+    {"id": "L009", "timestamp": "2026-04-14 10:15:30", "user_id": "12345", "query": "Quels sont mes dossiers en cours ?", "top_similarity": 0.0, "chunks_retrieved": 0, "gen_time_ms": 1250, "tokens_used": 1100, "outcome": "AGENT_RESOLVED", "model": "gemini-2.5-flash", "confidence": 90},
+    {"id": "L010", "timestamp": "2026-04-14 10:20:45", "user_id": "12345", "query": "Les vaccins sont-ils couverts ?", "top_similarity": 0.95, "chunks_retrieved": 3, "gen_time_ms": 580, "tokens_used": 650, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 95},
+    {"id": "L011", "timestamp": "2026-04-14 11:05:12", "user_id": "12345", "query": "Comment obtenir ma carte adherent ?", "top_similarity": 0.89, "chunks_retrieved": 2, "gen_time_ms": 720, "tokens_used": 800, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 89},
+    {"id": "L012", "timestamp": "2026-04-14 11:30:00", "user_id": "99999", "query": "Combien de seances de kine sont couvertes ?", "top_similarity": 0.92, "chunks_retrieved": 3, "gen_time_ms": 2100, "tokens_used": 1500, "outcome": "AGENT_RESOLVED", "model": "gemini-2.5-flash", "confidence": 92},
+    {"id": "L013", "timestamp": "2026-04-14 14:22:33", "user_id": "12345", "query": "Mon remboursement est incorrect", "top_similarity": 0.25, "chunks_retrieved": 1, "gen_time_ms": 1800, "tokens_used": 1200, "outcome": "HUMAN_ESCALATED", "model": "gemini-2.5-flash", "confidence": 25},
+    {"id": "L014", "timestamp": "2026-04-14 15:10:18", "user_id": "12345", "query": "Les IRM sont-elles couvertes ?", "top_similarity": 0.93, "chunks_retrieved": 3, "gen_time_ms": 650, "tokens_used": 720, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 93},
+    {"id": "L015", "timestamp": "2026-04-14 16:45:55", "user_id": "12345", "query": "La FIV est-elle prise en charge ?", "top_similarity": 0.87, "chunks_retrieved": 2, "gen_time_ms": 780, "tokens_used": 850, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 87},
+    {"id": "L016", "timestamp": "2026-04-14 17:00:01", "user_id": "99999", "query": "Quelles formules proposez-vous ?", "top_similarity": 0.0, "chunks_retrieved": 0, "gen_time_ms": 5000, "tokens_used": 0, "outcome": "DEGRADED", "model": "gemini-2.5-flash", "confidence": 0},
 ]
 
 SYSTEM_CONFIG = {
@@ -72,8 +80,10 @@ async def get_metrics(matricule: str = Depends(get_current_user)):
     total = len(logs)
     rag_resolved = sum(1 for l in logs if l["outcome"] == "RAG_RESOLVED")
     ai_fallback = sum(1 for l in logs if l["outcome"] == "AI_FALLBACK")
+    agent_resolved = sum(1 for l in logs if l["outcome"] == "AGENT_RESOLVED")
     human_escalated = sum(1 for l in logs if l["outcome"] == "HUMAN_ESCALATED")
     errors = sum(1 for l in logs if l["outcome"] == "ERROR")
+    degraded = sum(1 for l in logs if l["outcome"] == "DEGRADED")
     avg_confidence = round(sum(l["confidence"] for l in logs) / max(total, 1), 1)
     avg_response_time = round(sum(l["gen_time_ms"] for l in logs) / max(total, 1))
 
@@ -82,15 +92,19 @@ async def get_metrics(matricule: str = Depends(get_current_user)):
     return {
         "total_requests": total,
         "rag_resolved": rag_resolved,
+        "agent_resolved": agent_resolved,
         "ai_fallback": ai_fallback,
         "human_escalated": human_escalated,
         "errors": errors,
+        "degraded": degraded,
         "avg_confidence": avg_confidence,
         "avg_response_time_ms": avg_response_time,
         "rag_success_rate": round(rag_resolved / max(total, 1) * 100, 1),
+        "agent_success_rate": round(agent_resolved / max(total, 1) * 100, 1),
         "fallback_rate": round(ai_fallback / max(total, 1) * 100, 1),
         "escalation_rate": round(human_escalated / max(total, 1) * 100, 1),
         "error_rate": round(errors / max(total, 1) * 100, 1),
+        "degraded_rate": round(degraded / max(total, 1) * 100, 1),
         "open_tickets": len(MOCK_ESCALATION_TICKETS),
         "time_series": [
             {"day": "Mon", "rag_confidence": 82, "response_time": 120, "requests": 180},

@@ -57,6 +57,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      MOCK_SERVER_URL: http://localhost:8000
       OLLAMA_BASE_URL: http://ollama:11434/v1
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
@@ -96,6 +97,21 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- Angular Frontend (Development Server) ---
+  frontend:
+    image: node:20-alpine
+    container_name: iway-frontend
+    working_dir: /app
+    command: sh -c "npm install && npx ng serve --host 0.0.0.0 --port 4200 --disable-host-check"
+    volumes:
+      - "./iway ui:/app"
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "4200:4200"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   # --- Ollama (Local LLM Serving) ---
   # Uncomment and configure GPU passthrough for local LLM support
   # ollama:
@@ -117,4 +133,5 @@ services:
 volumes:
   pgdata:
   redisdata:
+  frontend_node_modules:
   # ollama_models:

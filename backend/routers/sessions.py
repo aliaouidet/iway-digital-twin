@@ -17,7 +17,8 @@ from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
-from backend.routers.auth import get_current_user, MOCK_USERS
+from backend.routers.auth import get_current_user, MOCK_USERS, bearer_scheme
+from fastapi.security import HTTPAuthorizationCredentials
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -49,13 +50,17 @@ class ResolveInput(BaseModel):
 # --- Endpoints ---
 
 @router.post("/create")
-async def create_session(matricule: str = Depends(get_current_user)):
+async def create_session(
+    matricule: str = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
     """Create a new chat session for a user."""
     session_id = f"sess-{uuid.uuid4().hex[:8]}"
     user = MOCK_USERS.get(matricule, {})
     SESSIONS[session_id] = {
         "id": session_id,
         "user_matricule": matricule,
+        "user_token": credentials.credentials,  # JWT for agent tool calls
         "user_name": f"{user.get('prenom', '')} {user.get('nom', '')}".strip(),
         "user_role": user.get("role", "Unknown"),
         "status": "active",

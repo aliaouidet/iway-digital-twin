@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # --- RAG ---
     RAG_TOP_K: int = 5
     RAG_SIMILARITY_THRESHOLD: float = 0.70
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"
     EMBEDDING_DIMENSIONS: int = 384
 
     # --- HITL ---

@@ -157,4 +157,12 @@ INSERT INTO audit_log (trace_id, event_type, outcome, latency_ms, model_used, co
     ('L005', 'user_query', 'RAG_RESOLVED',     610,  'gemini-2.5-flash', 0.96, '{"query": "Prise en charge hospitaliere urgence"}',      '2026-04-13 19:03:44+00'),
     ('L006', 'user_query', 'ERROR',            3100, 'gemini-2.5-flash', 0.15, '{"query": "Erreur de connexion au portail prestataire"}','2026-04-13 19:02:18+00'),
     ('L007', 'user_query', 'RAG_RESOLVED',     690,  'gemini-2.5-flash', 0.92, '{"query": "Quel est le plafond pour les soins dentaires ?"}', '2026-04-13 19:01:05+00'),
-    ('L008', 'user_query', 'RAG_RESOLVED',     870,  'gemini-2.5-flash', 0.91, '{"query": "Quelle est la prime de naissance ?"}',        '2026-04-13 19:00:22+00');
+    ('L008', 'user_query', 'RAG_RESOLVED',     870,  'gemini-2.5-flash', 0.91, '{"query": "Quelle est la prime de naissance ?"}',        '2026-04-13 19:00:22+00'),
+    ('L009', 'user_query', 'AGENT_RESOLVED',   1250, 'gemini-2.5-flash', 0.90, '{"query": "Quels sont mes dossiers en cours ?", "tools_called": ["get_personal_dossiers"]}', '2026-04-14 10:15:30+00'),
+    ('L010', 'user_query', 'RAG_RESOLVED',     580,  'gemini-2.5-flash', 0.95, '{"query": "Les vaccins sont-ils couverts ?"}',           '2026-04-14 10:20:45+00'),
+    ('L011', 'user_query', 'RAG_RESOLVED',     720,  'gemini-2.5-flash', 0.89, '{"query": "Comment obtenir ma carte adherent ?"}',       '2026-04-14 11:05:12+00'),
+    ('L012', 'user_query', 'AGENT_RESOLVED',   2100, 'gemini-2.5-flash', 0.92, '{"query": "Combien de seances de kine sont couvertes ?", "tools_called": ["search_knowledge_base"]}', '2026-04-14 11:30:00+00'),
+    ('L013', 'user_query', 'HUMAN_ESCALATED',  1800, 'gemini-2.5-flash', 0.25, '{"query": "Mon remboursement est incorrect je veux un humain"}', '2026-04-14 14:22:33+00'),
+    ('L014', 'user_query', 'RAG_RESOLVED',     650,  'gemini-2.5-flash', 0.93, '{"query": "Les IRM sont-elles couvertes ?"}',            '2026-04-14 15:10:18+00'),
+    ('L015', 'user_query', 'RAG_RESOLVED',     780,  'gemini-2.5-flash', 0.87, '{"query": "La FIV est-elle prise en charge ?"}',         '2026-04-14 16:45:55+00'),
+    ('L016', 'user_query', 'DEGRADED',         5000, 'gemini-2.5-flash', 0.00, '{"query": "Quelles formules proposez-vous ?", "failure_type": "timeout"}', '2026-04-14 17:00:01+00');

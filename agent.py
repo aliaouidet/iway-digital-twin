@@ -15,6 +15,7 @@ Requires:        Mock Server on :8000  +  GOOGLE_API_KEY (cloud) or Ollama (loca
 """
 
 import os
+import logging
 import inspect
 import httpx
 from typing import Annotated
@@ -47,9 +48,16 @@ from bot_tools import (
 load_dotenv()
 
 USE_LOCAL_LLM = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
-MOCK_SERVER_URL = os.getenv("MOCK_SERVER_URL", "http://localhost:8000")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
+try:
+    from backend.config import get_settings as _get_settings
+    _settings = _get_settings()
+    MOCK_SERVER_URL = _settings.MOCK_SERVER_URL
+    OLLAMA_BASE_URL = _settings.OLLAMA_BASE_URL
+    OLLAMA_MODEL = _settings.OLLAMA_MODEL
+except Exception:
+    MOCK_SERVER_URL = os.getenv("MOCK_SERVER_URL", "http://localhost:8000")
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
 
 SYSTEM_PROMPT = """Tu es l'assistant virtuel I-Santé, l'assistant intelligent de la mutuelle I-Way Solutions.
 
@@ -122,7 +130,8 @@ def build_agent_graph():
         )
         mode_label = "CLOUD / Gemini 2.5 Flash"
 
-    print(f"  ⚡ LLM initialized: {mode_label}")
+    logger_agent = logging.getLogger("I-Way-Twin")
+    logger_agent.info(f"⚡ LLM initialized: {mode_label}")
 
     # Tools — binding works identically for both backends
     llm_with_tools = llm.bind_tools(TOOLS)

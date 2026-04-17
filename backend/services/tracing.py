@@ -122,6 +122,7 @@ class TraceStore:
         self._stats = {
             "total_requests": 0,
             "rag_resolved": 0,
+            "agent_resolved": 0,
             "ai_fallback": 0,
             "human_escalated": 0,
             "errors": 0,
@@ -140,6 +141,8 @@ class TraceStore:
         outcome = trace.outcome or "unknown"
         if outcome == "RAG_RESOLVED":
             self._stats["rag_resolved"] += 1
+        elif outcome == "AGENT_RESOLVED":
+            self._stats["agent_resolved"] += 1
         elif outcome == "AI_FALLBACK":
             self._stats["ai_fallback"] += 1
         elif outcome == "HUMAN_ESCALATED":
@@ -163,6 +166,7 @@ class TraceStore:
         return {
             "total_requests": total,
             "rag_resolved": self._stats["rag_resolved"],
+            "agent_resolved": self._stats["agent_resolved"],
             "ai_fallback": self._stats["ai_fallback"],
             "human_escalated": self._stats["human_escalated"],
             "errors": self._stats["errors"],
@@ -170,6 +174,9 @@ class TraceStore:
             "avg_duration_ms": avg_duration,
             "rag_success_rate": round(
                 self._stats["rag_resolved"] / max(total, 1) * 100, 1
+            ),
+            "agent_success_rate": round(
+                self._stats["agent_resolved"] / max(total, 1) * 100, 1
             ),
             "escalation_rate": round(
                 self._stats["human_escalated"] / max(total, 1) * 100, 1

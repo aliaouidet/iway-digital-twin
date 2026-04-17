@@ -56,8 +56,32 @@ async def search_knowledge_base(query: str) -> str:
     d'assurance I-Way en utilisant la recherche semantique.
     Utilise cette fonction pour repondre aux questions sur les plafonds,
     remboursements, delais, primes et procedures."""
-    import rag_engine
-    return rag_engine.search(query, k=3)
+    try:
+        from backend.services.rag_service import retrieve_context
+        results = retrieve_context(query, top_k=3)
+
+        if not results:
+            return "Aucune information trouvee dans la base de connaissances."
+
+        formatted = []
+        for i, res in enumerate(results, 1):
+            similarity_pct = round(res["similarity"] * 100, 1)
+            metadata = res.get("metadata", {})
+            question = metadata.get("question", "")
+            reponse = metadata.get("reponse", res["chunk_text"])
+            formatted.append(
+                f"[Resultat {i} — pertinence {similarity_pct}%]\n"
+                f"Q: {question}\n"
+                f"R: {reponse}"
+            )
+        return "\n\n".join(formatted)
+    except Exception as e:
+        # Fallback to rag_engine if backend is not available (standalone mode)
+        try:
+            import rag_engine
+            return rag_engine.search(query, k=3)
+        except Exception:
+            return f"Erreur lors de la recherche: {e}"
 
 
 # ── Tool 3: Escalation to Human Agent ────────────────────────
