@@ -1,11 +1,14 @@
 """
-Sessions Router — HITL session lifecycle management.
+Sessions Router — HITL session lifecycle management with multi-chat support.
 
 Routes:
   POST /api/v1/sessions/create
   GET  /api/v1/sessions/active
+  GET  /api/v1/sessions/user-chats        ← Multi-chat: list user's chats
   GET  /api/v1/sessions/{session_id}/history
+  GET  /api/v1/sessions/{session_id}/briefing   ← Agent briefing panel
   POST /api/v1/sessions/{session_id}/takeover
+  POST /api/v1/sessions/{session_id}/approve    ← Agent approves/clarifies AI response
   POST /api/v1/sessions/{session_id}/resolve
 """
 
@@ -24,7 +27,7 @@ logger = logging.getLogger("I-Way-Twin")
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
 
-# --- In-memory session store (will migrate to PostgreSQL in Phase 2 completion) ---
+# --- In-memory session store ---
 SESSIONS: Dict[str, Dict[str, Any]] = {}
 
 
@@ -46,6 +49,10 @@ class ResolveInput(BaseModel):
     save_to_knowledge: bool = False
     tags: Optional[List[str]] = None
 
+class ApproveInput(BaseModel):
+    action: str  # "approve" or "clarify"
+    clarification: Optional[str] = None  # Additional text if action is "clarify"
+
 
 # --- Endpoints ---
 
@@ -60,7 +67,7 @@ async def create_session(
     SESSIONS[session_id] = {
         "id": session_id,
         "user_matricule": matricule,
-        "user_token": credentials.credentials,  # JWT for agent tool calls
+        "user_token": credentials.credentials,
         "user_name": f"{user.get('prenom', '')} {user.get('nom', '')}".strip(),
         "user_role": user.get("role", "Unknown"),
         "status": "active",
@@ -70,6 +77,8 @@ async def create_session(
         "user_ws": None,
         "agent_ws": None,
         "reason": None,
+        "trigger_message": None,  # The low-confidence AI response that triggered escalation
+        "last_ai_confidence": None,
     }
     logger.info(f"Session created: {session_id} for {matricule}")
     return {"session_id": session_id}
@@ -92,10 +101,34 @@ async def get_active_sessions(matricule: str = Depends(get_current_user)):
                 "message_count": len(s["history"]),
                 "last_message": s["history"][-1]["content"][:80] if s["history"] else "",
                 "agent_matricule": s["agent_matricule"],
+                "last_ai_confidence": s.get("last_ai_confidence"),
             })
     priority = {"handoff_pending": 0, "active": 1, "agent_connected": 2}
     active.sort(key=lambda x: (priority.get(x["status"], 9), x["created_at"]))
     return active
+
+
+@router.get("/user-chats")
+async def get_user_chats(matricule: str = Depends(get_current_user)):
+    """List all chats for the current user (multi-chat support)."""
+    chats = []
+    for sid, s in SESSIONS.items():
+        if s["user_matricule"] == matricule:
+            last_msg = ""
+            if s["history"]:
+                last_msg = s["history"][-1]["content"][:80]
+            chats.append({
+                "id": s["id"],
+                "status": s["status"],
+                "created_at": s["created_at"],
+                "message_count": len(s["history"]),
+                "last_message": last_msg,
+                "reason": s["reason"],
+                "has_agent": s["agent_matricule"] is not None,
+            })
+    # Most recent first
+    chats.sort(key=lambda x: x["created_at"], reverse=True)
+    return chats
 
 
 @router.get("/{session_id}/history")
@@ -117,6 +150,145 @@ async def get_session_history(session_id: str, matricule: str = Depends(get_curr
     }
 
 
+@router.get("/{session_id}/briefing")
+async def get_session_briefing(session_id: str, matricule: str = Depends(get_current_user)):
+    """
+    Agent briefing panel — generates an LLM summary of the conversation 
+    and returns structured context so the agent can get up to speed fast.
+    """
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    history = session["history"]
+    user_messages = [m for m in history if m["role"] == "user"]
+    ai_messages = [m for m in history if m["role"] == "assistant"]
+
+    # Extract key topics from user messages
+    all_user_text = " ".join(m["content"] for m in user_messages)
+    topics = _extract_topics(all_user_text)
+
+    # Calculate duration
+    try:
+        created = datetime.fromisoformat(session["created_at"])
+        duration_minutes = int((datetime.now() - created).total_seconds() / 60)
+    except Exception:
+        duration_minutes = 0
+
+    # Find the last AI confidence before escalation
+    last_confidence = session.get("last_ai_confidence")
+    if last_confidence is None:
+        for msg in reversed(history):
+            if msg.get("confidence"):
+                last_confidence = msg["confidence"]
+                break
+
+    # Build conversation excerpt for LLM summary
+    conversation_excerpt = _build_conversation_excerpt(history, max_messages=10)
+
+    # Generate LLM summary (async)
+    ai_summary = await _generate_briefing_summary(
+        session["user_name"],
+        session["user_role"],
+        session["reason"],
+        conversation_excerpt,
+    )
+
+    return {
+        "session_id": session_id,
+        "client": {
+            "name": session["user_name"],
+            "role": session["user_role"],
+            "matricule": session["user_matricule"],
+        },
+        "escalation_reason": session["reason"],
+        "ai_summary": ai_summary,
+        "topics": topics,
+        "duration_minutes": duration_minutes,
+        "message_count": len(history),
+        "user_message_count": len(user_messages),
+        "ai_message_count": len(ai_messages),
+        "last_ai_confidence": last_confidence,
+        "trigger_message": session.get("trigger_message"),
+        "status": session["status"],
+    }
+
+
+@router.post("/{session_id}/approve")
+async def approve_ai_response(
+    session_id: str,
+    body: ApproveInput,
+    matricule: str = Depends(get_current_user),
+):
+    """
+    Agent approves or clarifies the AI's trigger response.
+    
+    - approve: The AI's response was good enough, send it to the user as-is
+    - clarify: Agent adds clarification, combined with original AI response
+    """
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    trigger = session.get("trigger_message")
+    if not trigger:
+        raise HTTPException(status_code=400, detail="No trigger message to approve")
+
+    user = MOCK_USERS.get(matricule, {})
+    agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip()
+
+    if body.action == "approve":
+        # Send the AI's original response to the user as agent-approved
+        approved_msg = {
+            "role": "agent",
+            "content": f"✅ {trigger['content']}",
+            "timestamp": datetime.now().isoformat(),
+            "approved_from_ai": True,
+        }
+        session["history"].append(approved_msg)
+        # Notify user via WebSocket
+        user_ws = session.get("user_ws")
+        if user_ws:
+            try:
+                await user_ws.send_json({
+                    "type": "agent_message",
+                    "content": approved_msg["content"],
+                    "timestamp": approved_msg["timestamp"],
+                    "approved_from_ai": True,
+                })
+            except Exception:
+                pass
+        return {"status": "approved", "message": "AI response approved and sent to user"}
+
+    elif body.action == "clarify":
+        # Agent augments the AI response with clarification
+        clarified_content = trigger["content"]
+        if body.clarification:
+            clarified_content += f"\n\n📝 Précision de l'agent {agent_name} : {body.clarification}"
+        
+        clarified_msg = {
+            "role": "agent",
+            "content": clarified_content,
+            "timestamp": datetime.now().isoformat(),
+            "clarified_from_ai": True,
+        }
+        session["history"].append(clarified_msg)
+        user_ws = session.get("user_ws")
+        if user_ws:
+            try:
+                await user_ws.send_json({
+                    "type": "agent_message",
+                    "content": clarified_msg["content"],
+                    "timestamp": clarified_msg["timestamp"],
+                    "clarified_from_ai": True,
+                })
+            except Exception:
+                pass
+        return {"status": "clarified", "message": "Clarified response sent to user"}
+
+    raise HTTPException(status_code=400, detail="action must be 'approve' or 'clarify'")
+
+
 @router.post("/{session_id}/takeover")
 async def takeover_session(session_id: str, matricule: str = Depends(get_current_user)):
     """Agent takes over a session."""
@@ -129,14 +301,18 @@ async def takeover_session(session_id: str, matricule: str = Depends(get_current
     agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip()
     session["history"].append({
         "role": "system",
-        "content": f"Agent {agent_name} a rejoint la conversation.",
+        "content": f"L'agent {agent_name} vient de rejoindre. Il a lu le résumé de votre conversation.",
         "timestamp": datetime.now().isoformat()
     })
     # Notify user
     user_ws = session.get("user_ws")
     if user_ws:
         try:
-            await user_ws.send_json({"type": "agent_joined", "agent_name": agent_name})
+            await user_ws.send_json({
+                "type": "agent_joined",
+                "agent_name": agent_name,
+                "message": f"L'agent {agent_name} vient de rejoindre. Il a lu le résumé de votre conversation.",
+            })
         except Exception:
             pass
     # Broadcast
@@ -152,13 +328,7 @@ async def resolve_session(
     body: Optional[ResolveInput] = None,
     matricule: str = Depends(get_current_user),
 ):
-    """
-    Mark a session as resolved.
-    
-    If body.save_to_knowledge is True, the agent's last answer and the user's
-    question are embedded and added to the HITL-validated knowledge base.
-    These entries receive a 15% trust boost in future RAG searches.
-    """
+    """Mark a session as resolved, optionally saving to HITL knowledge base."""
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -166,14 +336,13 @@ async def resolve_session(
     session["status"] = "resolved"
     session["history"].append({
         "role": "system",
-        "content": "Session resolue par l'agent.",
+        "content": "Session résolue par l'agent.",
         "timestamp": datetime.now().isoformat()
     })
 
     # --- HITL Feedback Loop ---
     hitl_result = None
     if body and body.save_to_knowledge:
-        # Extract the last user question and last agent answer
         user_questions = [m for m in session["history"] if m["role"] == "user"]
         agent_answers = [m for m in session["history"] if m["role"] == "agent"]
 
@@ -193,8 +362,6 @@ async def resolve_session(
                 tags=body.tags,
             )
             logger.info(f"🧠 HITL knowledge saved from session {session_id}")
-        else:
-            logger.warning(f"Cannot save HITL knowledge: no Q&A pairs in session {session_id}")
 
     # Notify user
     user_ws = session.get("user_ws")
@@ -213,3 +380,131 @@ async def resolve_session(
     if hitl_result:
         result["hitl_knowledge"] = hitl_result
     return result
+
+
+# ==============================================================
+# HELPER FUNCTIONS
+# ==============================================================
+
+def _extract_topics(text: str) -> list:
+    """Extract key topics/keywords from user messages."""
+    # Insurance-domain keyword extraction
+    topic_keywords = {
+        "remboursement": "Remboursement",
+        "rembourse": "Remboursement",
+        "dentaire": "Soins dentaires",
+        "dent": "Soins dentaires",
+        "optique": "Optique",
+        "lunette": "Optique",
+        "hospitalisation": "Hospitalisation",
+        "hopital": "Hospitalisation",
+        "urgence": "Urgences",
+        "maternite": "Maternité",
+        "naissance": "Maternité",
+        "grossesse": "Maternité",
+        "beneficiaire": "Bénéficiaires",
+        "enfant": "Bénéficiaires",
+        "conjoint": "Bénéficiaires",
+        "carte": "Carte adhérent",
+        "adherent": "Adhésion",
+        "cotisation": "Cotisations",
+        "prime": "Primes",
+        "reclamation": "Réclamation",
+        "plainte": "Réclamation",
+        "medicament": "Pharmacie",
+        "pharmacie": "Pharmacie",
+        "consultation": "Consultation",
+        "medecin": "Consultation",
+        "kine": "Kinésithérapie",
+        "labo": "Analyses",
+        "analyse": "Analyses",
+        "radio": "Imagerie",
+        "irm": "Imagerie",
+        "scanner": "Imagerie",
+        "vaccin": "Vaccination",
+        "dossier": "Dossiers",
+        "prestation": "Prestations",
+        "facture": "Facturation",
+    }
+    text_lower = text.lower()
+    found = set()
+    for keyword, topic in topic_keywords.items():
+        if keyword in text_lower:
+            found.add(topic)
+    return list(found)[:6]  # Max 6 topics
+
+
+def _build_conversation_excerpt(history: list, max_messages: int = 10) -> str:
+    """Build a text excerpt of the conversation for LLM summarization."""
+    recent = history[-max_messages:] if len(history) > max_messages else history
+    lines = []
+    for msg in recent:
+        role_label = {
+            "user": "Client",
+            "assistant": "IA",
+            "agent": "Agent",
+            "system": "Système"
+        }.get(msg["role"], msg["role"])
+        lines.append(f"{role_label}: {msg['content']}")
+    return "\n".join(lines)
+
+
+async def _generate_briefing_summary(
+    user_name: str,
+    user_role: str,
+    reason: str,
+    conversation_excerpt: str,
+) -> str:
+    """Generate an LLM summary of the conversation for the agent briefing."""
+    try:
+        from backend.config import get_settings
+        settings = get_settings()
+        
+        if settings.USE_LOCAL_LLM:
+            from langchain_community.chat_models import ChatOllama
+            llm = ChatOllama(model=settings.OLLAMA_MODEL, base_url=settings.OLLAMA_BASE_URL)
+        else:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(
+                model=settings.LLM_MODEL,
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0.1,
+            )
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        prompt = f"""Tu es un assistant interne pour les agents du support I-Santé.
+Génère un résumé concis (3-4 phrases) de cette conversation pour aider l'agent à comprendre rapidement la situation.
+
+Client: {user_name} ({user_role})
+Raison d'escalade: {reason or 'Non spécifiée'}
+
+Conversation:
+{conversation_excerpt}
+
+Résumé pour l'agent (en français, 3-4 phrases max):"""
+
+        response = await llm.ainvoke([
+            SystemMessage(content="Tu résumes des conversations client pour les agents de support."),
+            HumanMessage(content=prompt),
+        ])
+        return response.content.strip()
+
+    except Exception as e:
+        logger.warning(f"⚠️ Briefing summary generation failed: {e}")
+        # Fallback: simple extractive summary
+        return _fallback_summary(user_name, user_role, reason, conversation_excerpt)
+
+
+def _fallback_summary(user_name: str, user_role: str, reason: str, excerpt: str) -> str:
+    """Simple extractive summary when LLM is unavailable."""
+    lines = excerpt.split("\n")
+    client_lines = [l for l in lines if l.startswith("Client:")]
+    if client_lines:
+        first_q = client_lines[0].replace("Client: ", "")
+        summary = f"{user_name} ({user_role}) a contacté le support. "
+        summary += f"Question initiale : \"{first_q[:100]}\". "
+        if reason:
+            summary += f"Escaladé car : {reason}."
+        return summary
+    return f"{user_name} ({user_role}) a contacté le support. Raison: {reason or 'non spécifiée'}."

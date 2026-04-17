@@ -66,17 +66,14 @@ def _get_agent():
 # AGENTIC AI RESPONSE (Primary Path — LangGraph + Tools)
 # ==============================================================
 
-async def get_agent_response(query: str, session: dict, websocket: WebSocket) -> dict:
+async def get_agent_response(query: str, session: dict, websocket: WebSocket, handoff_mode: bool = False) -> dict:
     """
     Generate a response using the full LangGraph agent with tool calling.
     
-    Flow:
-    1. Build LangChain message history from session
-    2. Stream agent execution via astream_events
-    3. Send tool status and tokens to WebSocket in real-time
-    4. Return final response with metadata
+    When handoff_mode=True, the agent uses an empathetic tone acknowledging
+    that a human agent is on the way.
     """
-    from langchain_core.messages import HumanMessage, AIMessage
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
     agent = _get_agent()
     if agent is None:
@@ -84,13 +81,22 @@ async def get_agent_response(query: str, session: dict, websocket: WebSocket) ->
 
     # Convert session history to LangChain messages
     lc_history = []
+
+    # Inject empathetic system prompt for handoff mode
+    if handoff_mode:
+        lc_history.append(SystemMessage(content=(
+            "IMPORTANT: Un agent humain est en route pour aider le client. "
+            "Tu continues à répondre en attendant, mais adopte un ton empathique et rassurant. "
+            "Reconnais que tu ne peux peut-être pas résoudre complètement le problème. "
+            "Aide autant que possible tout en rassurant le client qu'un spécialiste arrive bientôt. "
+            "Ne dis PAS que tu es une IA de manière répétitive. Sois naturel et utile."
+        )))
+
     for h in session.get("history", []):
         if h["role"] == "user":
             lc_history.append(HumanMessage(content=h["content"]))
         elif h["role"] == "assistant":
             lc_history.append(AIMessage(content=h["content"]))
-    # The current message is already appended to history, so it's the last one
-    # We use it directly  
     
     initial_state = {
         "messages": lc_history,
@@ -306,8 +312,91 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         except Exception:
                             handle_agent_disconnect(session, sessions_store)
                             await websocket.send_json({"type": "handoff_started", "reason": "Agent disconnected — re-queued"})
+
+                elif session["status"] == "handoff_pending":
+                    # ═══ HYBRID HANDOFF: AI continues with empathetic tone ═══
+                    await websocket.send_json({"type": "thinking", "status": "Réflexion en cours..."})
+
+                    trace = RequestTrace(
+                        session_id=session_id,
+                        user_matricule=session.get("user_matricule", ""),
+                        query=content,
+                    )
+                    span_recv = trace.start_span("RECEIVED", message_length=len(content))
+                    span_recv.finish()
+
+                    ai_result = None
+
+                    # Try agent first, then RAG, then simulated — same 3-tier
+                    if llm_circuit.can_execute():
+                        span_agent = trace.start_span("HANDOFF_AI_RESPONSE")
+                        try:
+                            ai_result = await asyncio.wait_for(
+                                get_agent_response(content, session, websocket, handoff_mode=True),
+                                timeout=settings.LLM_TIMEOUT_SECONDS + 10
+                            )
+                            if ai_result:
+                                span_agent.finish(source="langgraph_agent_handoff")
+                                llm_circuit.record_success()
+                            else:
+                                span_agent.finish(status="agent_unavailable")
+                        except asyncio.TimeoutError:
+                            span_agent.finish(status="timeout")
+                            llm_circuit.record_failure()
+                        except Exception as e:
+                            span_agent.finish(status="error", error=str(e))
+
+                    if ai_result is None:
+                        from backend.services.rag_service import knowledge_store
+                        if knowledge_store.count > 0:
+                            ai_result = await get_rag_ai_response(content)
+                        else:
+                            await asyncio.sleep(0.3 + random.random() * 0.3)
+                            ai_result = get_simulated_ai_response(content)
+
+                    # Send response with handoff_ai flag
+                    if ai_result and ai_result.get("text"):
+                        response_text = ai_result["text"]
+                        confidence = ai_result.get("confidence", 50)
+
+                        # Stream tokens if not already streamed by agent
+                        if ai_result.get("source") != "langgraph_agent":
+                            words = response_text.split(" ")
+                            for i, word in enumerate(words):
+                                token = word + (" " if i < len(words) - 1 else "")
+                                await websocket.send_json({"type": "ai_token", "token": token})
+                                await asyncio.sleep(0.03 + random.random() * 0.05)
+
+                        await websocket.send_json({
+                            "type": "ai_done",
+                            "confidence": confidence,
+                            "is_handoff_ai": True,  # UI shows badge
+                            "source": ai_result.get("source", "handoff_ai"),
+                        })
+                        session["history"].append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "timestamp": datetime.now().isoformat(),
+                            "confidence": confidence,
+                            "is_handoff_ai": True,
+                        })
+                        session["last_ai_confidence"] = confidence
+
+                        trace.finish("HANDOFF_AI_RESOLVED", confidence=confidence)
+                    else:
+                        await websocket.send_json({
+                            "type": "ai_done",
+                            "confidence": 0,
+                            "is_handoff_ai": True,
+                            "text": "Je comprends votre frustration. Un agent va vous répondre très bientôt.",
+                        })
+                        trace.finish("HANDOFF_AI_FALLBACK", confidence=0)
+
+                    trace_store.add(trace)
+                    await broadcast_trace(trace)
+
                 else:
-                    # === AI RESPONSE FLOW ===
+                    # === NORMAL AI RESPONSE FLOW (session.status == "active") ===
                     await websocket.send_json({"type": "thinking"})
 
                     # --- Start trace ---
@@ -327,7 +416,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         try:
                             ai_result = await asyncio.wait_for(
                                 get_agent_response(content, session, websocket),
-                                timeout=settings.LLM_TIMEOUT_SECONDS + 10  # Agent gets extra time for tool calls
+                                timeout=settings.LLM_TIMEOUT_SECONDS + 10
                             )
                             if ai_result:
                                 span_agent.finish(
@@ -382,6 +471,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "confidence": ai_result["confidence"],
                             "source": "langgraph_agent",
                         })
+                        session["last_ai_confidence"] = ai_result["confidence"]
                         trace.finish(
                             "AGENT_RESOLVED",
                             confidence=ai_result["confidence"],
@@ -393,6 +483,12 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         span_eval.finish(status="degraded", failure_type=ai_result.get("failure_type"))
                         trace.finish("DEGRADED", confidence=0)
 
+                        # Store trigger message
+                        session["trigger_message"] = {
+                            "content": ai_result["text"],
+                            "confidence": 0,
+                            "reason": f"Service degradation ({ai_result.get('failure_type', 'unknown')})",
+                        }
                         session["status"] = "handoff_pending"
                         session["reason"] = f"Service degradation ({ai_result.get('failure_type', 'unknown')})"
                         session["history"].append({
@@ -404,6 +500,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "type": "handoff_started",
                             "reason": session["reason"],
                             "degraded": True,
+                            "keep_chatting": True,
                         })
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
@@ -417,19 +514,31 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             }
                         })
 
-                    # Handle low confidence → escalate
+                    # Handle low confidence → escalate (but AI keeps chatting)
                     elif ai_result["confidence"] < 30 or ai_result["text"] is None:
                         span_eval.finish(status="low_confidence")
                         trace.finish("HUMAN_ESCALATED", confidence=ai_result["confidence"])
 
+                        # Store the trigger message for agent review
+                        trigger_text = ai_result.get("text") or "Réponse insuffisante — confidence trop basse"
+                        session["trigger_message"] = {
+                            "content": trigger_text,
+                            "confidence": ai_result["confidence"],
+                            "query": content,
+                        }
+                        session["last_ai_confidence"] = ai_result["confidence"]
                         session["status"] = "handoff_pending"
                         session["reason"] = f"Low confidence ({ai_result['confidence']}%) on: {content[:50]}"
                         session["history"].append({
                             "role": "system",
-                            "content": "Transfert vers un specialiste I-Way en cours...",
+                            "content": "Un agent va vous rejoindre bientôt. Vous pouvez continuer à poser des questions en attendant.",
                             "timestamp": datetime.now().isoformat()
                         })
-                        await websocket.send_json({"type": "handoff_started", "reason": session["reason"]})
+                        await websocket.send_json({
+                            "type": "handoff_started",
+                            "reason": session["reason"],
+                            "keep_chatting": True,
+                        })
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
                             "payload": {
@@ -467,6 +576,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "confidence": ai_result["confidence"],
                             "source": ai_result.get("source", "simulated"),
                         })
+                        session["last_ai_confidence"] = ai_result["confidence"]
                         span_stream.finish(tokens=len(words))
                         trace.finish(
                             "RAG_RESOLVED" if ai_result.get("source") else "AI_FALLBACK",
