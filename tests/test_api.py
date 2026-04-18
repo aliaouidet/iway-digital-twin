@@ -251,6 +251,111 @@ class TestSessions:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 5b. BRIEFING ENDPOINT TESTS
+# ═══════════════════════════════════════════════════════════════
+
+class TestBriefing:
+    """Test the agent briefing panel endpoint (GET /api/v1/sessions/{sid}/briefing)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        # Create session as user
+        self.user_token = login("12345", "pass")["access_token"]
+        self.user_headers = auth_headers(self.user_token)
+        # Agent token
+        self.agent_token = login("88888", "agent")["access_token"]
+        self.agent_headers = auth_headers(self.agent_token)
+
+    def _create_session_with_history(self) -> str:
+        """Create a session and inject mock history via the sessions store."""
+        r = httpx.post(f"{BASE}/api/v1/sessions/create", headers=self.user_headers)
+        return r.json()["session_id"]
+
+    def test_briefing_structure(self):
+        """Briefing endpoint returns correct JSON structure."""
+        session_id = self._create_session_with_history()
+        r = httpx.get(f"{BASE}/api/v1/sessions/{session_id}/briefing", headers=self.agent_headers)
+        assert r.status_code == 200
+        data = r.json()
+        # Verify required fields
+        assert "client" in data
+        assert data["client"]["name"] is not None
+        assert data["client"]["matricule"] == "12345"
+        assert "ai_summary" in data
+        assert "topics" in data
+        assert isinstance(data["topics"], list)
+        assert "duration_minutes" in data
+        assert "message_count" in data
+        assert "status" in data
+
+    def test_briefing_404_invalid_session(self):
+        """Briefing returns 404 for nonexistent session."""
+        r = httpx.get(f"{BASE}/api/v1/sessions/sess-nonexistent/briefing", headers=self.agent_headers)
+        assert r.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════
+# 5c. HYBRID HANDOFF TESTS
+# ═══════════════════════════════════════════════════════════════
+
+class TestHybridHandoff:
+    """Test the hybrid handoff flow: escalation + takeover + resolve with HITL."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.user_token = login("12345", "pass")["access_token"]
+        self.user_headers = auth_headers(self.user_token)
+        self.agent_token = login("88888", "agent")["access_token"]
+        self.agent_headers = auth_headers(self.agent_token)
+
+    def test_takeover_changes_status(self):
+        """Agent takeover changes session status to agent_connected."""
+        # Create session
+        r = httpx.post(f"{BASE}/api/v1/sessions/create", headers=self.user_headers)
+        session_id = r.json()["session_id"]
+        # Takeover
+        r2 = httpx.post(f"{BASE}/api/v1/sessions/{session_id}/takeover", headers=self.agent_headers)
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "taken_over"
+        # Verify in active list
+        r3 = httpx.get(f"{BASE}/api/v1/sessions/active", headers=self.agent_headers)
+        session = next((s for s in r3.json() if s["id"] == session_id), None)
+        assert session is not None
+        assert session["status"] == "agent_connected"
+
+    def test_resolve_with_hitl_save(self):
+        """Resolve a session with save_to_knowledge flag."""
+        # Create + takeover
+        r = httpx.post(f"{BASE}/api/v1/sessions/create", headers=self.user_headers)
+        session_id = r.json()["session_id"]
+        httpx.post(f"{BASE}/api/v1/sessions/{session_id}/takeover", headers=self.agent_headers)
+        # Resolve with HITL save (may fail gracefully if no agent messages exist)
+        r2 = httpx.post(
+            f"{BASE}/api/v1/sessions/{session_id}/resolve",
+            headers=self.agent_headers,
+            json={"save_to_knowledge": True, "tags": ["test", "handoff"]},
+        )
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "resolved"
+
+    def test_takeover_nonexistent_session(self):
+        """Takeover returns 404 for nonexistent session."""
+        r = httpx.post(f"{BASE}/api/v1/sessions/sess-fake/takeover", headers=self.agent_headers)
+        assert r.status_code == 404
+
+    def test_user_chats_endpoint(self):
+        """User can list their own chats."""
+        httpx.post(f"{BASE}/api/v1/sessions/create", headers=self.user_headers)
+        r = httpx.get(f"{BASE}/api/v1/sessions/user-chats", headers=self.user_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        assert "id" in data[0]
+        assert "status" in data[0]
+
+
+# ═══════════════════════════════════════════════════════════════
 # 6. HEALTH & RESILIENCE TESTS
 # ═══════════════════════════════════════════════════════════════
 

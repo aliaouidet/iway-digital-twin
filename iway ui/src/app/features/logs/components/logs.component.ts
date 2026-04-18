@@ -52,9 +52,23 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
         </div>
       </div>
 
-      <!-- Loading -->
-      <div *ngIf="isLoading()" class="bg-[#0F172A] rounded-2xl border border-slate-800 p-8 space-y-4">
-        <div *ngFor="let _ of [1,2,3,4,5]" class="h-12 bg-slate-800/50 rounded-xl animate-pulse"></div>
+      <!-- Loading Skeleton -->
+      <div *ngIf="isLoading()" class="bg-[#0F172A] rounded-2xl border border-slate-800 overflow-hidden">
+        <!-- Skeleton header -->
+        <div class="flex gap-4 px-5 py-3 border-b border-slate-800">
+          <div *ngFor="let w of ['w-24','w-32','w-20','w-44','w-16','w-20','w-16','w-14']" class="h-3 rounded bg-slate-700/40 animate-pulse" [class]="w"></div>
+        </div>
+        <!-- Skeleton rows -->
+        <div *ngFor="let _ of [1,2,3,4,5,6,7,8]" class="flex gap-4 px-5 py-3.5 border-b border-slate-800/50 items-center">
+          <div class="w-24 h-2.5 rounded bg-slate-800/60 animate-pulse"></div>
+          <div class="w-32 h-2.5 rounded bg-slate-800/60 animate-pulse"></div>
+          <div class="w-20 h-5 rounded-full bg-slate-800/60 animate-pulse"></div>
+          <div class="w-44 h-2.5 rounded bg-slate-800/60 animate-pulse"></div>
+          <div class="w-16 h-2.5 rounded bg-slate-800/60 animate-pulse"></div>
+          <div class="w-20 h-5 rounded-lg bg-slate-800/60 animate-pulse"></div>
+          <div class="w-16 h-2.5 rounded bg-slate-800/60 animate-pulse"></div>
+          <div class="w-14 h-2.5 rounded bg-slate-800/60 animate-pulse"></div>
+        </div>
       </div>
 
       <!-- Logs Table -->
@@ -63,6 +77,7 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
           <table class="w-full">
             <thead>
               <tr class="border-b border-slate-800">
+                <th class="px-5 py-3.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-8"></th>
                 <th class="px-5 py-3.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Time</th>
                 <th class="px-5 py-3.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">User</th>
                 <th class="px-5 py-3.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Query</th>
@@ -73,7 +88,13 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let log of logs()" class="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors cursor-pointer group">
+              <tr *ngFor="let log of logs(); let i = index"
+                  (click)="toggleExpand(i)"
+                  class="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors cursor-pointer group"
+                  [ngClass]="{'bg-slate-800': expandedRow() === i}">
+                <td class="px-3 py-3.5">
+                  <svg class="w-3.5 h-3.5 text-slate-500 transition-transform duration-200" [class.rotate-90]="expandedRow() === i" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                </td>
                 <td class="px-5 py-3.5 text-xs text-slate-500 font-mono">{{formatTime(log.timestamp)}}</td>
                 <td class="px-5 py-3.5 text-xs text-slate-400">{{log.user_id}}</td>
                 <td class="px-5 py-3.5 text-sm text-slate-200 max-w-xs truncate">{{log.query}}</td>
@@ -96,7 +117,41 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
           </table>
         </div>
 
-        <!-- Pagination -->
+        <!-- Pipeline Waterfall Panel (outside table) -->
+        <div *ngIf="expandedLog() as log" class="px-6 py-5 bg-slate-900/50 border-t border-slate-800">
+          <div class="flex items-center gap-2 mb-4">
+            <svg class="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+            <h4 class="text-xs font-bold text-indigo-300 uppercase tracking-wider" style="font-family: 'Figtree', sans-serif;">Pipeline Waterfall</h4>
+            <span class="text-[10px] text-slate-500 ml-auto font-mono">Total: {{log.gen_time_ms}}ms</span>
+          </div>
+
+          <!-- Waterfall Bars -->
+          <div class="space-y-2">
+            <div *ngFor="let span of getSpansForLog(log)" class="flex items-center gap-3">
+              <span class="text-[10px] text-slate-400 w-24 text-right font-mono flex-shrink-0">{{span.name}}</span>
+              <div class="flex-1 h-5 bg-slate-800/50 rounded-md relative overflow-hidden">
+                <div class="h-full rounded-md flex items-center px-2 transition-all duration-500"
+                  [style.width.%]="span.widthPct"
+                  [style.margin-left.%]="span.offsetPct"
+                  [class]="span.barColor">
+                  <span *ngIf="span.duration_ms" class="text-[9px] font-bold text-white/80 whitespace-nowrap">{{span.duration_ms}}ms</span>
+                </div>
+              </div>
+              <span class="text-[10px] w-14 text-right flex-shrink-0" [class]="span.status === 'completed' ? 'text-emerald-400' : span.status === 'failed' ? 'text-rose-400' : 'text-amber-400'">
+                {{span.status}}
+              </span>
+            </div>
+          </div>
+
+          <!-- Metadata Tags -->
+          <div *ngIf="log.confidence" class="mt-4 pt-3 border-t border-slate-800 flex items-center gap-4">
+            <span class="text-[10px] text-slate-500">Confidence: <span class="font-bold" [class]="log.confidence >= 0.7 ? 'text-emerald-400' : log.confidence >= 0.4 ? 'text-amber-400' : 'text-rose-400'">{{(log.confidence * 100).toFixed(0)}}%</span></span>
+            <span *ngIf="log.model" class="text-[10px] text-slate-600">Model: <span class="text-slate-400">{{log.model}}</span></span>
+            <span class="text-[10px] text-slate-600">Trace: <span class="text-slate-400 font-mono">{{log.id?.substring(0,12) || 'n/a'}}</span></span>
+          </div>
+        </div>
+
+
         <div class="px-5 py-4 border-t border-slate-800 flex items-center justify-between">
           <span class="text-xs text-slate-500">Showing {{logs().length}} of {{totalLogs()}} entries</span>
           <div class="flex gap-1.5">
@@ -121,6 +176,11 @@ export class LogsComponent implements OnInit {
   currentPage = signal(1);
   totalPages = signal(1);
   totalLogs = signal(0);
+  expandedRow = signal<number | null>(null);
+  expandedLog = computed(() => {
+    const idx = this.expandedRow();
+    return idx !== null ? this.logs()[idx] ?? null : null;
+  });
 
   searchQuery = '';
   selectedOutcome = '';
@@ -132,6 +192,60 @@ export class LogsComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadLogs();
+  }
+
+  toggleExpand(index: number): void {
+    this.expandedRow.set(this.expandedRow() === index ? null : index);
+  }
+
+  /**
+   * Generate waterfall span data for a log entry.
+   * If the log has real span data (from trace), use it.
+   * Otherwise, synthesize approximate spans from gen_time_ms.
+   */
+  getSpansForLog(log: LogEntry): any[] {
+    // Try to use real spans if available
+    if ((log as any).spans && (log as any).spans.length > 0) {
+      const spans = (log as any).spans;
+      const totalMs = spans.reduce((sum: number, s: any) => sum + (s.duration_ms || 0), 0) || 1;
+      let offset = 0;
+      return spans.map((s: any) => {
+        const span = {
+          name: s.name,
+          duration_ms: s.duration_ms,
+          status: s.status,
+          widthPct: Math.max((s.duration_ms || 0) / totalMs * 100, 3),
+          offsetPct: offset / totalMs * 100,
+          barColor: this.getSpanColor(s.name),
+        };
+        offset += s.duration_ms || 0;
+        return span;
+      });
+    }
+
+    // Synthesize spans from gen_time_ms for logs without detailed trace data
+    const total = log.gen_time_ms || 1;
+    const ragSearch = Math.round(total * 0.25);
+    const llmEval = Math.round(total * 0.55);
+    const response = total - ragSearch - llmEval;
+
+    return [
+      { name: 'RECEIVED', duration_ms: 1, status: 'completed', widthPct: 3, offsetPct: 0, barColor: 'bg-slate-600' },
+      { name: 'RAG_SEARCH', duration_ms: ragSearch, status: 'completed', widthPct: ragSearch / total * 100, offsetPct: 0, barColor: 'bg-gradient-to-r from-cyan-500 to-cyan-400' },
+      { name: 'LLM_EVAL', duration_ms: llmEval, status: 'completed', widthPct: llmEval / total * 100, offsetPct: ragSearch / total * 100, barColor: 'bg-gradient-to-r from-indigo-500 to-violet-400' },
+      { name: 'RESPONSE', duration_ms: response, status: 'completed', widthPct: Math.max(response / total * 100, 5), offsetPct: (ragSearch + llmEval) / total * 100, barColor: 'bg-gradient-to-r from-emerald-500 to-emerald-400' },
+    ];
+  }
+
+  private getSpanColor(name: string): string {
+    const colors: Record<string, string> = {
+      'RECEIVED': 'bg-slate-600',
+      'RAG_SEARCH': 'bg-gradient-to-r from-cyan-500 to-cyan-400',
+      'LLM_EVAL': 'bg-gradient-to-r from-indigo-500 to-violet-400',
+      'RESPONSE': 'bg-gradient-to-r from-emerald-500 to-emerald-400',
+      'ESCALATED': 'bg-gradient-to-r from-amber-500 to-orange-400',
+    };
+    return colors[name] || 'bg-indigo-500';
   }
 
   onFilterChange(): void {

@@ -15,8 +15,10 @@ import asyncio
 import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
+from collections import defaultdict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -34,6 +36,9 @@ from backend.services.chat_service import handle_chat_websocket
 settings = get_settings()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger("I-Way-Twin")
+
+# --- Readiness Gate ---
+_app_ready = False
 
 
 # --- Lifespan (RSA Key Generation) ---
@@ -60,8 +65,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Initial knowledge sync failed (non-critical): {e}")
 
+    global _app_ready
+    _app_ready = True
     logger.info("✅ Digital Twin Online: Keys Generated & Routers Loaded.")
     yield
+    _app_ready = False
     logger.info("🛑 Digital Twin Shutting Down.")
 
 
@@ -162,6 +170,96 @@ async def health_check():
             "websocket_connections": len(ws_manager.active_connections),
         },
         "timestamp": datetime.now().isoformat()
+    }
+
+
+# --- Readiness Probe (for Docker/K8s startup checks) ---
+@app.get("/ready", tags=["System"])
+async def readiness_probe():
+    """Returns 200 only when the app is fully initialized (keys + model + knowledge loaded)."""
+    if not _app_ready:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "starting", "message": "Application is still initializing..."}
+        )
+    return {"status": "ready", "timestamp": datetime.now().isoformat()}
+
+
+# --- CSAT Feedback ---
+_feedback_store: list[dict] = []
+
+@app.post("/api/v1/sessions/{session_id}/feedback", tags=["Sessions"])
+async def submit_feedback(session_id: str, body: dict):
+    """
+    Submit CSAT feedback after session resolved.
+    Body: { rating: 'positive' | 'negative', comment?: string }
+    """
+    if session_id not in SESSIONS:
+        return JSONResponse(status_code=404, content={"error": "Session not found"})
+    rating = body.get("rating", "positive")
+    comment = body.get("comment", "")
+    feedback = {
+        "session_id": session_id,
+        "rating": rating,
+        "comment": comment,
+        "timestamp": datetime.now().isoformat(),
+    }
+    _feedback_store.append(feedback)
+    SESSIONS[session_id]["feedback"] = feedback
+    logger.info(f"📊 CSAT feedback for {session_id}: {rating}")
+    return {"status": "received", "rating": rating}
+
+
+@app.get("/api/v1/feedback/stats", tags=["Monitoring"])
+async def feedback_stats():
+    """Get aggregated CSAT stats for the admin dashboard."""
+    total = len(_feedback_store)
+    positive = sum(1 for f in _feedback_store if f["rating"] == "positive")
+    negative = sum(1 for f in _feedback_store if f["rating"] == "negative")
+    return {
+        "total": total,
+        "positive": positive,
+        "negative": negative,
+        "csat_score": round(positive / max(total, 1) * 100, 1),
+        "recent": _feedback_store[-10:],
+    }
+
+
+# --- Knowledge Gaps ---
+@app.get("/api/v1/knowledge/gaps", tags=["Monitoring"])
+async def get_knowledge_gaps():
+    """
+    Returns questions where AI had low confidence or escalated.
+    Admin can use this to identify missing documentation topics.
+    """
+    from backend.services.tracing import trace_store
+    gaps: list[dict] = []
+    topic_counts: dict[str, int] = defaultdict(int)
+
+    for trace in trace_store._traces:
+        if trace.outcome in ("HUMAN_ESCALATED", "AI_FALLBACK", "DEGRADED") or (
+            trace.confidence is not None and trace.confidence < 0.5
+        ):
+            gaps.append({
+                "query": trace.query,
+                "confidence": trace.confidence,
+                "outcome": trace.outcome,
+                "session_id": trace.session_id,
+                "timestamp": trace.created_at,
+            })
+            # Simple keyword extraction for topic clustering
+            words = trace.query.lower().split()
+            for w in words:
+                if len(w) > 4:  # Skip short/common words
+                    topic_counts[w] += 1
+
+    # Sort topics by frequency
+    top_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:15]
+
+    return {
+        "total_gaps": len(gaps),
+        "gaps": gaps[:50],
+        "top_missing_topics": [{"topic": t, "count": c} for t, c in top_topics],
     }
 
 

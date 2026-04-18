@@ -609,7 +609,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     "content": "Vous avez demande a parler a un agent humain. Transfert en cours...",
                     "timestamp": datetime.now().isoformat()
                 })
-                await websocket.send_json({"type": "handoff_started", "reason": session["reason"]})
+                await websocket.send_json({"type": "handoff_started", "reason": session["reason"], "keep_chatting": True})
                 await ws_manager.broadcast({
                     "type": "NEW_ESCALATION",
                     "payload": {

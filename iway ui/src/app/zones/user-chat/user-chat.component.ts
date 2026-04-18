@@ -7,6 +7,8 @@ import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
 import { ThemeService } from '../../core/services/theme.service';
+import { ToastService } from '../../core/services/toast.service';
+import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'agent' | 'system';
@@ -30,7 +32,7 @@ interface ChatThread {
 @Component({
   selector: 'app-user-chat',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, IwayLogoComponent],
   template: `
     <div class="h-screen flex transition-colors duration-300"
       [class]="isDark() ? 'bg-[#020617]' : 'bg-slate-50'">
@@ -42,11 +44,9 @@ interface ChatThread {
         <div class="h-16 flex items-center justify-between px-4 border-b flex-shrink-0"
           [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
           <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-lg flex items-center justify-center">
-              <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            <div style="width: 140px;">
+              <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
             </div>
-            <span class="text-sm font-bold" style="font-family: 'Figtree', sans-serif;"
-              [class]="isDark() ? 'text-white' : 'text-slate-900'">Mes Chats</span>
           </div>
           <div class="flex items-center gap-1">
             <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
@@ -246,19 +246,61 @@ interface ChatThread {
           </div>
         </div>
 
+        <!-- CSAT Feedback Widget -->
+        <div *ngIf="isSessionResolved() && !feedbackGiven()" class="px-4 py-4 border-t flex-shrink-0 transition-all"
+          [class]="isDark() ? 'bg-indigo-500/5 border-indigo-500/20' : 'bg-indigo-50 border-indigo-200'">
+          <div class="max-w-3xl mx-auto">
+            <div *ngIf="!showFeedbackComment()" class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4" [class]="isDark() ? 'text-indigo-400' : 'text-indigo-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"/></svg>
+                <span class="text-xs font-semibold" [class]="isDark() ? 'text-indigo-300' : 'text-indigo-700'">Cette conversation vous a-t-elle été utile ?</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button (click)="submitFeedback('positive')" class="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  [class]="isDark() ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200'">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.633 10.5c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 012.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 00.322-1.672V3a.75.75 0 01.75-.75A2.25 2.25 0 0116.5 4.5c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 01-2.649 7.521c-.388.482-.987.729-1.605.729H13.48c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 00-1.423-.23H5.904M14.25 9h2.25M5.904 18.75c.083.205.173.405.27.602.197.4-.078.898-.523.898h-.908c-.889 0-1.713-.518-1.972-1.368a12 12 0 01-.521-3.507c0-1.553.295-3.036.831-4.398C3.387 10.203 4.167 9.75 5 9.75h1.053c.472 0 .745.556.5.96a8.958 8.958 0 00-1.302 4.665c0 1.194.232 2.333.654 3.375z"/></svg>
+                  Oui
+                </button>
+                <button (click)="showFeedbackComment.set(true); feedbackRating = 'negative'" class="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-rose-500/50"
+                  [class]="isDark() ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20' : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200'">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7.5 15h2.25m8.024-9.75c.011.05.028.1.052.148.591 1.2.924 2.55.924 3.977a8.96 8.96 0 01-.999 4.125m.023-8.25c-.076-.365.183-.75.575-.75h.908c.889 0 1.713.518 1.972 1.368.339 1.11.521 2.287.521 3.507 0 1.553-.295 3.036-.831 4.398-.306.774-1.086 1.227-1.918 1.227h-1.053c-.472 0-.745-.556-.5-.96a8.95 8.95 0 00.303-.54m.023-8.25H16.48a4.5 4.5 0 01-1.423-.23l-3.114-1.04a4.5 4.5 0 00-1.423-.23H6.504c-.618 0-1.217.247-1.605.729A11.95 11.95 0 002.25 12c0 .434.023.863.068 1.285C2.427 14.306 3.346 15 4.372 15h3.126c.618 0 .991.724.725 1.282A7.471 7.471 0 007.5 19.5a2.25 2.25 0 002.25 2.25.75.75 0 00.75-.75v-.633c0-.573.11-1.14.322-1.672.304-.76.93-1.33 1.653-1.715a9.04 9.04 0 002.86-2.4c.498-.634 1.226-1.08 2.032-1.08h.384"/></svg>
+                  Non
+                </button>
+              </div>
+            </div>
+            <!-- Comment input for negative feedback -->
+            <div *ngIf="showFeedbackComment()" class="space-y-3">
+              <p class="text-xs font-semibold" [class]="isDark() ? 'text-rose-300' : 'text-rose-700'">Qu'est-ce qui pourrait être amélioré ?</p>
+              <textarea [(ngModel)]="feedbackComment" rows="2" placeholder="Votre commentaire (optionnel)..."
+                class="w-full px-3 py-2 rounded-lg text-xs transition-all focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
+                [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400'"></textarea>
+              <div class="flex gap-2">
+                <button (click)="submitFeedback('negative')" class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-rose-600 hover:bg-rose-500 text-white focus:outline-none focus:ring-2 focus:ring-rose-500/50">Envoyer</button>
+                <button (click)="showFeedbackComment.set(false)" class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors" [class]="isDark() ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-600 border border-slate-200'">Annuler</button>
+              </div>
+            </div>
+            <!-- Thank you message -->
+          </div>
+        </div>
+
+        <!-- Thank you after feedback -->
+        <div *ngIf="feedbackGiven()" class="px-4 py-3 border-t flex-shrink-0 text-center"
+          [class]="isDark() ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'">
+          <p class="text-xs font-semibold" [class]="isDark() ? 'text-emerald-400' : 'text-emerald-700'">Merci pour votre retour !</p>
+        </div>
+
         <!-- Input -->
-        <div class="px-4 py-4 border-t flex-shrink-0 transition-colors"
+        <div *ngIf="!isSessionResolved()" class="px-4 py-4 border-t flex-shrink-0 transition-colors"
           [class]="isDark() ? 'bg-[#0F172A]/60 border-slate-800' : 'bg-white border-slate-200'">
           <form (ngSubmit)="sendMessage()" class="flex items-end gap-3 max-w-3xl mx-auto">
             <div class="flex-1 relative">
               <textarea [(ngModel)]="newMessage" name="msg" rows="1"
-                [placeholder]="isSessionResolved() ? 'Session terminée' : 'Écrivez votre message...'"
-                [disabled]="isSessionResolved()"
-                class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none disabled:opacity-50"
+                placeholder="Écrivez votre message..."
+                class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
                 [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400'"
                 (keydown.enter)="$any($event).shiftKey ? null : onEnter($event)"></textarea>
             </div>
-            <button type="submit" [disabled]="!newMessage.trim() || isSessionResolved()"
+            <button type="submit" [disabled]="!newMessage.trim()"
               class="w-11 h-11 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed flex-shrink-0">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
             </button>
@@ -282,6 +324,12 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   agentName = signal('');
   isSessionResolved = signal(false);
 
+  // CSAT Feedback
+  feedbackGiven = signal(false);
+  showFeedbackComment = signal(false);
+  feedbackRating = 'positive';
+  feedbackComment = '';
+
   sessionId = '';
   private socket$: WebSocketSubject<any> | null = null;
   private streamingContent = '';
@@ -297,7 +345,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     private authService: AuthService,
     private themeService: ThemeService,
     private http: HttpClient,
-    private router: Router
+    private router: Router,
+    private toastService: ToastService
   ) { }
 
   isDark = () => this.themeService.isDark();
@@ -450,6 +499,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       case 'agent_joined':
         this.agentName.set(msg.agent_name || 'Agent');
         this.isHandoffPending.set(false);
+        this.toastService.show(`${msg.agent_name || 'Un agent'} a rejoint la conversation`, 'info');
         this.messages.update(m => [...m, {
           role: 'system',
           content: msg.message || `${msg.agent_name} a rejoint la conversation.`
@@ -460,6 +510,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.messages.update(m => [...m, { role: 'agent', content: msg.content, timestamp: msg.timestamp }]);
         break;
       case 'session_resolved':
+        this.toastService.show('Session résolue. Merci pour votre patience!', 'success');
         this.messages.update(m => [...m, { role: 'system', content: 'Session résolue. Merci d\'avoir contacté I-Way.' }]);
         this.isSessionResolved.set(true);
         this.loadChatThreads();
@@ -489,6 +540,19 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   onEnter(event: Event): void {
     event.preventDefault();
     this.sendMessage();
+  }
+
+  submitFeedback(rating: string): void {
+    if (!this.sessionId) return;
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${this.sessionId}/feedback`, {
+      rating,
+      comment: this.feedbackComment,
+    }).subscribe({
+      next: () => {
+        this.feedbackGiven.set(true);
+        this.showFeedbackComment.set(false);
+      }
+    });
   }
 
   logout(): void {

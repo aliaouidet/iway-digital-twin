@@ -2,6 +2,21 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
+/* === Custom Fonts === */
+@font-face {
+  font-family: 'Handel Gothic';
+  src: url('/assets/fonts/Handel Gothic Regular.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Century Gothic Paneuropean';
+  src: url('/assets/fonts/CenturyGothicPaneuropeanThin.ttf') format('truetype');
+  font-weight: 100;
+  font-style: normal;
+}
+
 /* === Base Styles === */
 html, body {
   height: 100%;

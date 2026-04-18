@@ -9,6 +9,9 @@ import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
 import { ThemeService } from '../../core/services/theme.service';
 import { WebSocketService } from '../../core/services/websocket.service';
+import { ToastService } from '../../core/services/toast.service';
+import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
+import { ConfidenceGaugeComponent } from '../../shared/components/confidence-gauge.component';
 
 interface QueueItem {
   id: string;
@@ -49,7 +52,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 @Component({
   selector: 'app-agent-workspace',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, IwayLogoComponent, ConfidenceGaugeComponent],
   template: `
     <div class="h-screen flex transition-colors duration-300"
       [class]="isDark() ? 'bg-[#020617]' : 'bg-slate-50'">
@@ -61,11 +64,9 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
         <div class="h-14 flex items-center justify-between px-4 border-b flex-shrink-0"
           [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
           <div class="flex items-center gap-2">
-            <div class="w-7 h-7 bg-gradient-to-br from-amber-500 to-orange-600 rounded-lg flex items-center justify-center">
-              <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+            <div style="width: 140px;">
+              <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
             </div>
-            <span class="text-sm font-bold" style="font-family: 'Figtree', sans-serif;"
-              [class]="isDark() ? 'text-white' : 'text-slate-900'">Console Agent</span>
           </div>
           <div class="flex items-center gap-1">
             <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
@@ -107,9 +108,26 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
         <!-- Queue Items -->
         <div class="flex-1 overflow-y-auto px-3 space-y-1.5 custom-scrollbar">
-          <div *ngIf="filteredQueue().length === 0" class="text-center py-10">
+          <div *ngIf="filteredQueue().length === 0 && !queueLoading()" class="text-center py-10">
             <svg class="w-8 h-8 mx-auto mb-2" [class]="isDark() ? 'text-slate-700' : 'text-slate-300'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
             <p class="text-[11px]" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">Aucune escalation</p>
+          </div>
+
+          <!-- Skeleton loader -->
+          <div *ngIf="queueLoading()" class="space-y-2">
+            <div *ngFor="let s of [1,2,3]" class="p-3 rounded-xl border animate-pulse"
+              [class]="isDark() ? 'bg-slate-800/30 border-slate-700/50' : 'bg-slate-50 border-slate-200'">
+              <div class="flex items-center gap-2 mb-2">
+                <div class="w-2 h-2 rounded-full" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
+                <div class="h-3 rounded w-24" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
+                <div class="ml-auto h-3 rounded w-12" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
+              </div>
+              <div class="h-2.5 rounded w-full mb-1.5" [class]="isDark() ? 'bg-slate-700/60' : 'bg-slate-100'"></div>
+              <div class="flex justify-between">
+                <div class="h-2 rounded w-10" [class]="isDark() ? 'bg-slate-700/40' : 'bg-slate-100'"></div>
+                <div class="h-2 rounded w-14" [class]="isDark() ? 'bg-slate-700/40' : 'bg-slate-100'"></div>
+              </div>
+            </div>
           </div>
 
           <button *ngFor="let item of filteredQueue()" (click)="selectSession(item)"
@@ -184,13 +202,46 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59"/></svg>
                 {{isTakingOver() ? 'Prise en charge...' : 'Prendre en charge'}}
               </button>
-              <button *ngIf="hasTakenOver()" (click)="resolveSession()"
-                class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white">
+              <button *ngIf="hasTakenOver()" (click)="showResolveDialog.set(true)"
+                class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 Résoudre
               </button>
             </div>
           </header>
+
+          <!-- Resolve Dialog (inline panel) -->
+          <div *ngIf="showResolveDialog()" class="border-b overflow-hidden transition-all"
+            [class]="isDark() ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'">
+            <div class="px-5 py-4">
+              <div class="flex items-center gap-2 mb-3">
+                <svg class="w-4 h-4" [class]="isDark() ? 'text-emerald-400' : 'text-emerald-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="text-xs font-bold" [class]="isDark() ? 'text-emerald-300' : 'text-emerald-800'">Résoudre cette session</span>
+              </div>
+              <label class="flex items-center gap-2 mb-3 cursor-pointer">
+                <input type="checkbox" [(ngModel)]="saveToKnowledge" class="w-3.5 h-3.5 rounded border accent-emerald-500 cursor-pointer"
+                  [class]="isDark() ? 'border-slate-600' : 'border-slate-300'" />
+                <span class="text-[11px] font-medium" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">Sauvegarder dans la base de connaissances (HITL)</span>
+              </label>
+              <div *ngIf="saveToKnowledge" class="mb-3">
+                <input [(ngModel)]="resolveTags" placeholder="Tags (séparés par virgule, ex: dentaire, remboursement)"
+                  class="w-full px-3 py-2 rounded-lg text-[11px] transition-all focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                  [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400'" />
+              </div>
+              <div class="flex items-center gap-2">
+                <button (click)="resolveSession()"
+                  class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                  Confirmer
+                </button>
+                <button (click)="showResolveDialog.set(false)"
+                  class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-slate-500/50"
+                  [class]="isDark() ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'">
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
 
           <!-- Briefing Panel (collapsible) -->
           <div *ngIf="showBriefing() && briefing()" class="border-b overflow-hidden transition-all"
@@ -207,7 +258,9 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     {{briefing()!.ai_summary}}
                   </p>
                 </div>
-                <div class="flex flex-col gap-1.5 flex-shrink-0 text-right">
+                <div class="flex flex-col gap-1.5 flex-shrink-0 items-end">
+                  <app-confidence-gauge *ngIf="briefing()!.last_ai_confidence !== null"
+                    [value]="briefing()!.last_ai_confidence!" [size]="72" [strokeWidth]="5"></app-confidence-gauge>
                   <div class="flex items-center gap-1.5">
                     <span class="text-[9px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Durée</span>
                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold" [class]="isDark() ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-700'">
@@ -218,13 +271,6 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <span class="text-[9px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Messages</span>
                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold" [class]="isDark() ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-700'">
                       {{briefing()!.message_count}}
-                    </span>
-                  </div>
-                  <div *ngIf="briefing()!.last_ai_confidence !== null" class="flex items-center gap-1.5">
-                    <span class="text-[9px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Confiance IA</span>
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold"
-                      [class]="getConfidenceClass(briefing()!.last_ai_confidence!)">
-                      {{briefing()!.last_ai_confidence}}%
                     </span>
                   </div>
                 </div>
@@ -273,6 +319,56 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   </button>
                 </div>
               </div>
+
+              <!-- Session Timeline -->
+              <div class="mt-4 pt-3 border-t" [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
+                <div class="flex items-center gap-1.5 mb-3">
+                  <svg class="w-3 h-3" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span class="text-[9px] font-bold uppercase tracking-wider" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Chronologie</span>
+                </div>
+                <div class="relative pl-4">
+                  <!-- Vertical line -->
+                  <div class="absolute left-[5px] top-1 bottom-1 w-px" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
+
+                  <!-- Event: Chat started -->
+                  <div class="relative flex items-start gap-2.5 mb-3">
+                    <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0"
+                      [class]="isDark() ? 'bg-indigo-500 border-indigo-400' : 'bg-indigo-500 border-indigo-300'"></div>
+                    <div>
+                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">Chat démarré</span>
+                      <span class="text-[9px] ml-1" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">par {{briefing()!.client.name}}</span>
+                    </div>
+                  </div>
+
+                  <!-- Event: AI responses with confidence -->
+                  <div *ngFor="let evt of getTimelineConfidenceEvents()" class="relative flex items-start gap-2.5 mb-3">
+                    <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0"
+                      [class]="evt.confidence >= 70 ? 'bg-emerald-500 border-emerald-400' : evt.confidence >= 40 ? 'bg-amber-500 border-amber-400' : 'bg-rose-500 border-rose-400'"></div>
+                    <div>
+                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">IA a répondu</span>
+                      <span class="text-[10px] font-bold ml-1"
+                        [class]="evt.confidence >= 70 ? 'text-emerald-400' : evt.confidence >= 40 ? 'text-amber-400' : 'text-rose-400'">({{evt.confidence}}%)</span>
+                    </div>
+                  </div>
+
+                  <!-- Event: Handoff triggered -->
+                  <div *ngIf="briefing()!.escalation_reason" class="relative flex items-start gap-2.5 mb-3">
+                    <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-rose-500 border-rose-400"></div>
+                    <div>
+                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-rose-300' : 'text-rose-700'">Handoff déclenché</span>
+                      <p class="text-[9px] mt-0.5 truncate max-w-[200px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">{{briefing()!.escalation_reason}}</p>
+                    </div>
+                  </div>
+
+                  <!-- Event: Agent joined -->
+                  <div *ngIf="briefing()!.status === 'agent_connected'" class="relative flex items-start gap-2.5">
+                    <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-emerald-500 border-emerald-400"></div>
+                    <div>
+                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-emerald-300' : 'text-emerald-700'">Agent connecté</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -294,11 +390,12 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               </div>
               <!-- AI -->
               <div *ngSwitchCase="'assistant'" class="flex justify-start gap-2">
-                <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-1 text-[9px] font-bold"
+                <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-1"
                   [class]="msg.is_handoff_ai
-                    ? (isDark() ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-100 text-orange-600')
-                    : (isDark() ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-500')">
-                  {{msg.is_handoff_ai ? '⏳' : 'AI'}}
+                    ? (isDark() ? 'bg-orange-500/10' : 'bg-orange-100')
+                    : (isDark() ? 'bg-slate-800' : 'bg-slate-200')">
+                  <svg *ngIf="msg.is_handoff_ai" class="w-3 h-3" [class]="isDark() ? 'text-orange-400' : 'text-orange-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <svg *ngIf="!msg.is_handoff_ai" class="w-3 h-3" [class]="isDark() ? 'text-slate-400' : 'text-slate-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
                 </div>
                 <div>
                   <!-- Handoff badge -->
@@ -352,6 +449,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   @ViewChild('chatContainer') private chatContainer!: ElementRef;
 
   queue = signal<QueueItem[]>([]);
+  queueLoading = signal(true);
   activeSession = signal<QueueItem | null>(null);
   chatHistory = signal<ChatMessage[]>([]);
   hasTakenOver = signal(false);
@@ -375,6 +473,11 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   showClarifyInput = signal(false);
   clarifyText = '';
 
+  // Resolve dialog
+  showResolveDialog = signal(false);
+  saveToKnowledge = false;
+  resolveTags = '';
+
   private eventSub?: Subscription;
   private sessionSocket$: WebSocketSubject<any> | null = null;
   private currentAgentMatricule = '';
@@ -384,7 +487,8 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     private themeService: ThemeService,
     private wsService: WebSocketService,
     private http: HttpClient,
-    private router: Router
+    private router: Router,
+    private toastService: ToastService
   ) {}
 
   isDark = () => this.themeService.isDark();
@@ -402,7 +506,13 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.loadQueue();
     this.wsService.connect();
     this.eventSub = this.wsService.getMessages().subscribe(msg => {
-      if (msg.type === 'NEW_ESCALATION' || msg.type === 'SESSION_RESOLVED' || msg.type === 'AGENT_JOINED') {
+      if (msg.type === 'NEW_ESCALATION') {
+        this.toastService.show('Nouvelle escalation reçue', 'warning');
+        this.loadQueue();
+      } else if (msg.type === 'SESSION_RESOLVED') {
+        this.toastService.show('Session résolue avec succès', 'success');
+        this.loadQueue();
+      } else if (msg.type === 'AGENT_JOINED') {
         this.loadQueue();
       }
     });
@@ -411,9 +521,10 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   // ─── Queue ───
 
   private loadQueue(): void {
+    this.queueLoading.set(true);
     this.http.get<QueueItem[]>(`${environment.apiUrl}/api/v1/sessions/active`).subscribe({
-      next: (items) => this.queue.set(items),
-      error: (err) => console.error('Failed to load queue:', err)
+      next: (items) => { this.queue.set(items); this.queueLoading.set(false); },
+      error: (err) => { console.error('Failed to load queue:', err); this.queueLoading.set(false); }
     });
   }
 
@@ -560,6 +671,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       next: () => {
         this.hasTakenOver.set(true);
         this.isTakingOver.set(false);
+        this.toastService.show('Session prise en charge', 'success');
         this.connectToSessionWs(session.id);
         this.loadHistory(session.id);
         this.loadQueue();
@@ -596,13 +708,26 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   resolveSession(): void {
     const session = this.activeSession();
     if (!session) return;
-    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/resolve`, {}).subscribe({
+
+    const body: any = {};
+    if (this.saveToKnowledge) {
+      body.save_to_knowledge = true;
+      if (this.resolveTags.trim()) {
+        body.tags = this.resolveTags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
+      }
+    }
+
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/resolve`, body).subscribe({
       next: () => {
+        this.toastService.show('Session résolue avec succès', 'success');
         this.activeSession.set(null);
         this.chatHistory.set([]);
         this.hasTakenOver.set(false);
         this.showBriefing.set(false);
         this.briefing.set(null);
+        this.showResolveDialog.set(false);
+        this.saveToKnowledge = false;
+        this.resolveTags = '';
         this.sessionSocket$?.complete();
         this.sessionSocket$ = null;
         this.loadQueue();
@@ -654,6 +779,12 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       const d = new Date(iso);
       return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     } catch { return ''; }
+  }
+
+  getTimelineConfidenceEvents(): { confidence: number }[] {
+    return this.chatHistory()
+      .filter(m => m.role === 'assistant' && m.confidence != null)
+      .map(m => ({ confidence: m.confidence! }));
   }
 
   logout(): void {

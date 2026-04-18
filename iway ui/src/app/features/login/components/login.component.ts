@@ -4,11 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 import { ThemeService } from '../../../core/services/theme.service';
+import { IwayLogoComponent } from '../../../shared/components/iway-logo.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, IwayLogoComponent],
   template: `
     <div class="min-h-screen flex items-center justify-center p-4 transition-colors duration-300"
          [class]="isDark() ? 'bg-[#020617]' : 'bg-gradient-to-br from-slate-50 to-indigo-50'">
@@ -23,13 +24,9 @@ import { ThemeService } from '../../../core/services/theme.service';
       <div class="w-full max-w-md space-y-8">
         <!-- Logo -->
         <div class="text-center">
-          <div class="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center shadow-lg mb-5"
-            [class]="isDark() ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-indigo-500/20' : 'bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-indigo-500/30'">
-            <svg class="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          <div class="w-80 mx-auto mb-6">
+            <app-iway-logo [dark]="isDark()" [compact]="false" width="100%"></app-iway-logo>
           </div>
-          <h1 class="text-3xl font-extrabold tracking-tight" style="font-family: 'Figtree', sans-serif;"
-            [class]="isDark() ? 'text-white' : 'text-slate-900'">I-Way AI Support</h1>
-          <p class="text-sm mt-2" [class]="isDark() ? 'text-slate-500' : 'text-slate-500'">Healthcare Insurance Monitoring System</p>
         </div>
 
         <!-- Login Card -->

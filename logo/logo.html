@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>i-Way | Animated Logo</title>
+  
+  <!-- Fallback fonts for the live preview environment -->
+  <link href="https://fonts.googleapis.com/css2?family=Michroma&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    /* These @font-face rules will look for the font files in the exact same 
+      folder as this HTML file on your computer.
+    */
+    @font-face {
+        font-family: 'Handel Gothic';
+        src: url('./Handel%20Gothic%20Regular.otf') format('opentype');
+        font-weight: normal;
+        font-style: normal;
+    }
+
+    @font-face {
+        font-family: 'Century Gothic Paneuropean';
+        src: url('./CenturyGothicPaneuropeanThin.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+    }
+
+    /* ==========================================
+       Environment & Presentation Styles
+       ========================================== */
+    :root {
+      --bg-color: #f4f6f8;
+      --card-bg: #ffffff;
+      --text-main: #1a1a1a;
+      --border-color: #e2e8f0;
+      --btn-bg: #0A6C8C;
+      --btn-hover: #085a75;
+    }
+
+    body.dark-mode {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #ffffff;
+      --border-color: #334155;
+      --btn-bg: #64A8C1;
+      --btn-hover: #7bbcd5;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--bg-color);
+      font-family: 'Montserrat', sans-serif;
+      transition: background-color 0.4s ease;
+    }
+
+    .showcase-card {
+      background: var(--card-bg);
+      padding: 60px 80px;
+      border-radius: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+      border: 1px solid var(--border-color);
+      transition: all 0.4s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 40px;
+      
+      /* Added these properties to let you manually resize the card and test the logo's responsiveness! */
+      width: 100%;
+      max-width: 400px;
+      resize: horizontal; 
+      overflow: hidden;
+    }
+
+    .controls {
+      display: flex;
+      gap: 16px;
+    }
+
+    button {
+      background: var(--btn-bg);
+      color: #fff;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button:hover {
+      background: var(--btn-hover);
+      transform: translateY(-2px);
+    }
+    
+    body.dark-mode button {
+      color: #0f172a;
+    }
+
+    /* ==========================================
+       SVG Logo & Animation Styles
+       ========================================== */
+    .logo-svg {
+      /* CHANGED: Removed hardcoded pixel width. 
+         Setting width to 100% makes the SVG fully fluid and modular. 
+         It will now perfectly fill whatever container you place it inside on your website. */
+      width: 100%; 
+      height: auto;
+      max-width: 100%;
+      overflow: visible;
+    }
+
+    /* Exact Typography Matching */
+    .main-text {
+      /* Uses custom Handel Gothic if locally available, falls back to Michroma in preview */
+      font-family: 'Handel Gothic', 'Michroma', sans-serif;
+      font-size: 67px;
+      letter-spacing: 0px;
+      fill: var(--text-main);
+      transition: fill 0.4s ease;
+    }
+
+    .sub-text {
+      /* Uses custom Century Gothic if locally available, falls back to Montserrat in preview */
+      font-family: 'Century Gothic Paneuropean', 'Montserrat', sans-serif;
+      font-weight: 300;
+      font-size: 14.5px;
+      letter-spacing: 0.5px;
+      fill: var(--text-main);
+      transition: fill 0.4s ease;
+    }
+
+    /* --- Animation Phase 1: Intro Sequences --- */
+    
+    /* 1. Sphere Spark Pop (For the Blue Dot) */
+    .s-intro {
+      opacity: 0;
+      transform: scale(0);
+      animation: sparkPop 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    
+    /* 1b. Sphere Roll-Drop (For the Gray Orbs) */
+    .s-drop {
+      opacity: 0;
+      transform: translateY(-60px) rotate(-180deg) scale(0.5);
+      animation: rollDrop 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    
+    /* Precisely mapped to the newly spaced centers of each orb */
+    .s1 { transform-origin: 40px 58px; animation-delay: 0.1s; }
+    .s2 { transform-origin: 69px 58px; animation-delay: 0.25s; } 
+    .s3 { transform-origin: 98px 58px; animation-delay: 0.4s; } 
+    .s4 { transform-origin: 127px 58px; animation-delay: 0.55s; }
+
+    @keyframes sparkPop {
+      0% { transform: scale(0) rotate(-45deg); opacity: 0; }
+      60% { transform: scale(1.15) rotate(10deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    
+    @keyframes rollDrop {
+      0% { transform: translateY(-60px) rotate(-180deg) scale(0.5); opacity: 0; }
+      100% { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; }
+    }
+
+    /* 2. Text Reveal (Sleek Swipe) */
+    .text-mask {
+      clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+      /* Sharper bezier curve for a more dramatic tech-swipe */
+      animation: swipeRight 1.2s cubic-bezier(0.86, 0, 0.07, 1) forwards;
+      animation-delay: 0.4s;
+    }
+
+    @keyframes swipeRight {
+      0% { clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); }
+      100% { clip-path: polygon(0 0, 110% 0, 110% 100%, 0 100%); }
+    }
+
+    /* 3. Subtext Fade-Up */
+    .sub-text-intro {
+      opacity: 0;
+      transform: translateY(15px);
+      animation: fadeUp 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      animation-delay: 0.8s;
+    }
+
+    @keyframes fadeUp {
+      0% { opacity: 0; transform: translateY(15px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    /* --- Animation Phase 2: Continuous Idle --- */
+    .s-idle {
+      animation: floatIdle 3s ease-in-out infinite alternate;
+    }
+    
+    .idle-1 { animation-delay: 1.0s; }
+    .idle-2 { animation-delay: 1.2s; }
+    .idle-3 { animation-delay: 1.4s; }
+    .idle-4 { animation-delay: 1.6s; }
+
+    @keyframes floatIdle {
+      /* Added a tiny scaling effect to give it a "breathing energy" feel */
+      0% { transform: translateY(0px) scale(1); }
+      100% { transform: translateY(-5px) scale(1.02); }
+    }
+
+    /* Interactive Orb Class (Handles JS transform) */
+    .interactive-orb {
+      /* No CSS transitions needed here, JS Lerping handles the smooth movement */
+      transform-origin: center center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="showcase-card">
+    <svg class="logo-svg" viewBox="0 0 320 160" id="iway-logo">
+      
+      <!-- Definitions -->
+      <defs>
+        <!-- Text Dot Clipper - Extended 1px to the right (x goes from 46 to 47) -->
+        <clipPath id="hide-dot-clip">
+          <polygon points="0,70 47,70 47,0 350,0 350,160 0,160" />
+        </clipPath>
+        
+        <!-- Orb Circular Mask (keeps the Pepsi wave strictly inside the spheres) -->
+        <clipPath id="circle-clip">
+          <!-- CHANGED: Made the clip radius exactly 10 to match the base sphere, so the stripe touches the edge perfectly -->
+          <circle cx="0" cy="0" r="10" />
+        </clipPath>
+
+        <!-- Redesigned Wave Vector Shape: 
+             Extended beyond the sphere bounds (to x=15 and x=-15).
+             The clip-path now cleanly cuts the ends off so they are 100% flush with the circle edge! -->
+        <path id="pepsi-wave-path" d="M -15, 0 Q 0, -10 15, -2 L 15, 8 Q 0, -2 -15, 3 Z" />
+        
+        <!-- 3D Orb Gradients -->
+        <radialGradient id="orb-blue" cx="30%" cy="30%" r="70%">
+          <stop offset="0%" stop-color="#5fc2e3"/>
+          <stop offset="100%" stop-color="#015a77"/>
+        </radialGradient>
+        
+        <radialGradient id="orb-dark" cx="30%" cy="30%" r="70%">
+          <stop offset="0%" stop-color="#e8e8e8"/>
+          <stop offset="100%" stop-color="#8a8a8a"/>
+        </radialGradient>
+        
+        <radialGradient id="orb-mid" cx="30%" cy="30%" r="70%">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#a1a1a1"/>
+        </radialGradient>
+        
+        <radialGradient id="orb-light" cx="30%" cy="30%" r="70%">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#d9d9d9"/>
+        </radialGradient>
+      </defs>
+
+      <!-- SPHERES GROUP with beautifully balanced spacing for Handel Gothic -->
+      
+      <!-- 1. Blue Sphere (Spark Pops in from the dot position) -->
+      <g class="s-intro s1">
+        <g class="s-idle idle-1">
+          <g transform="translate(40, 58)" class="orb-anchor">
+            <!-- Added interactive-orb wrapper for JS tracking -->
+            <g class="interactive-orb">
+              <circle cx="0" cy="0" r="10" fill="url(#orb-blue)"/>
+              <g clip-path="url(#circle-clip)">
+                <!-- Adjusted angle to point down/left -->
+                <use href="#pepsi-wave-path" transform="rotate(-15)" fill="#95dcf2" />
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+      
+      <!-- 2. Dark Gray Sphere (Roll Drops in) -->
+      <g class="s-drop s2">
+        <g class="s-idle idle-2">
+          <g transform="translate(69, 58)" class="orb-anchor">
+            <g class="interactive-orb">
+              <circle cx="0" cy="0" r="10" fill="url(#orb-dark)"/>
+              <g clip-path="url(#circle-clip)">
+                <!-- Adjusted angle to point slightly down/right -->
+                <use href="#pepsi-wave-path" transform="rotate(35)" fill="#f2f2f2" />
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+      
+      <!-- 3. Mid Gray Sphere (Roll Drops in) -->
+      <g class="s-drop s3">
+        <g class="s-idle idle-3">
+          <g transform="translate(98, 58)" class="orb-anchor">
+            <g class="interactive-orb">
+              <circle cx="0" cy="0" r="10" fill="url(#orb-mid)"/>
+              <g clip-path="url(#circle-clip)">
+                <!-- Adjusted angle to point up/right -->
+                <use href="#pepsi-wave-path" transform="rotate(95)" fill="#ffffff" />
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+      
+      <!-- 4. Light Gray Sphere (Roll Drops in) -->
+      <g class="s-drop s4">
+        <g class="s-idle idle-4">
+          <g transform="translate(127, 58)" class="orb-anchor">
+            <g class="interactive-orb">
+              <circle cx="0" cy="0" r="10" fill="url(#orb-light)"/>
+              <g clip-path="url(#circle-clip)">
+                <!-- Adjusted angle to point up/left -->
+                <use href="#pepsi-wave-path" transform="rotate(-70)" fill="#ffffff" />
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+
+      <!-- TYPOGRAPHY GROUP -->
+      <!-- We nest the CSS animation clip (text-mask) inside the SVG dot-hiding clip (hide-dot-clip) -->
+      <g clip-path="url(#hide-dot-clip)">
+        <g class="text-mask">
+          <text x="32" y="105" class="main-text">i-way</text>
+        </g>
+      </g>
+      
+      <g class="sub-text-intro">
+        <!-- Shifted to x=52 to align perfectly with Handel Gothic's hyphen -->
+        <text x="52" y="121" class="sub-text">Intelligence Way</text>
+      </g>
+
+    </svg>
+  </div>
+
+  <div class="controls">
+    <button onclick="replayAnimation()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+      Replay Animation
+    </button>
+    <button onclick="toggleTheme()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      Toggle Dark Mode
+    </button>
+  </div>
+
+  <script>
+    function replayAnimation() {
+      const logo = document.getElementById('iway-logo');
+      const newLogo = logo.cloneNode(true);
+      logo.parentNode.replaceChild(newLogo, logo);
+      
+      // Re-initialize orb anchors after DOM replacement
+      initInteractiveOrbs();
+    }
+    
+    function toggleTheme() {
+      document.body.classList.toggle('dark-mode');
+    }
+
+    // --- Interactive Magnetic Orbs Logic (Optimized) ---
+    let mouseX = -1000;
+    let mouseY = -1000;
+
+    // Track mouse position globally
+    document.addEventListener('mousemove', (e) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+    });
+
+    let orbData = [];
+    let animationFrameId;
+
+    function initInteractiveOrbs() {
+      // Clean up previous loop if any
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      
+      const anchors = document.querySelectorAll('.orb-anchor');
+      const orbs = document.querySelectorAll('.interactive-orb');
+
+      orbData = Array.from(orbs).map((orb, i) => ({
+        orbEl: orb,
+        anchorEl: anchors[i],
+        currX: 0,
+        currY: 0,
+        anchorX: 0,
+        anchorY: 0
+      }));
+
+      // Calculate the anchor positions immediately
+      calculateAnchors();
+      
+      // Start the highly optimized animation loop
+      animateOrbs();
+    }
+
+    // Function to calculate exact screen coordinates ONLY when needed (Page load & window resize)
+    function calculateAnchors() {
+      orbData.forEach(data => {
+        const rect = data.anchorEl.getBoundingClientRect();
+        data.anchorX = rect.left + rect.width / 2;
+        data.anchorY = rect.top + rect.height / 2;
+      });
+    }
+
+    // Re-calculate the layout bounds only when the user changes window size
+    window.addEventListener('resize', calculateAnchors);
+
+    function animateOrbs() {
+      orbData.forEach(data => {
+        // Now using the pre-calculated data.anchorX and data.anchorY!
+        // No heavy DOM calculations inside the frame loop.
+        const dx = mouseX - data.anchorX;
+        const dy = mouseY - data.anchorY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Interaction Settings
+        const maxDist = 200; // Activation distance (pixels)
+        const maxMove = 6;   // Max pixel movement distance
+        
+        let targetX = 0;
+        let targetY = 0;
+
+        // If the mouse is close enough, apply a magnetic pull
+        if (distance < maxDist && distance > 0) {
+          // Force gets stronger as the cursor gets closer
+          const force = Math.pow((maxDist - distance) / maxDist, 1.2); 
+          
+          targetX = (dx / distance) * force * maxMove;
+          targetY = (dy / distance) * force * maxMove;
+        }
+
+        // Lerp (Linear Interpolation) for buttery smooth drifting effect
+        // The 0.08 value controls the 'weight/smoothness' of the return
+        data.currX += (targetX - data.currX) * 0.08;
+        data.currY += (targetY - data.currY) * 0.08;
+
+        // Apply hardware-accelerated CSS transform
+        data.orbEl.style.transform = `translate(${data.currX}px, ${data.currY}px)`;
+      });
+      
+      // Keep loop running seamlessly
+      animationFrameId = requestAnimationFrame(animateOrbs);
+    }
+
+    // Start interaction loop on load
+    initInteractiveOrbs();
+  </script>
+</body>
+</html>

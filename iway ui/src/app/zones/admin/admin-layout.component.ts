@@ -5,11 +5,12 @@ import { Subscription } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
 import { ThemeService } from '../../core/services/theme.service';
 import { WebSocketService } from '../../core/services/websocket.service';
+import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
 
 @Component({
   selector: 'app-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterModule],
+  imports: [CommonModule, RouterOutlet, RouterModule, IwayLogoComponent],
   template: `
     <div class="flex h-screen transition-colors duration-300"
       [class]="isDark() ? 'bg-[#020617] text-slate-200' : 'bg-slate-50 text-slate-800'">
@@ -17,12 +18,11 @@ import { WebSocketService } from '../../core/services/websocket.service';
       <!-- Sidebar -->
       <aside class="w-64 flex flex-col border-r z-10 flex-shrink-0 transition-colors"
         [class]="isDark() ? 'bg-[#0F172A] border-slate-800' : 'bg-white border-slate-200'">
-        <div class="p-6 text-xl font-bold tracking-wider flex items-center gap-3 border-b"
+        <div class="p-5 border-b flex items-center gap-2"
           [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
-          <div class="w-9 h-9 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          <div style="width: 140px;">
+            <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
           </div>
-          <span style="font-family: 'Figtree', sans-serif;" [class]="isDark() ? 'text-white' : 'text-slate-900'">I-Way AI</span>
         </div>
         <nav class="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
           <div class="text-[10px] font-semibold uppercase tracking-[0.15em] mb-3 mt-1 px-3"
