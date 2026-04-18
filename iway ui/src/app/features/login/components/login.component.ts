@@ -23,8 +23,8 @@ import { IwayLogoComponent } from '../../../shared/components/iway-logo.componen
 
       <div class="w-full max-w-md space-y-8">
         <!-- Logo -->
-        <div class="text-center">
-          <div class="w-80 mx-auto mb-6">
+        <div class="flex justify-center">
+          <div class="w-96 mb-8 translate-x-4">
             <app-iway-logo [dark]="isDark()" [compact]="false" width="100%"></app-iway-logo>
           </div>
         </div>

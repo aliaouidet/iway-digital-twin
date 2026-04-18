@@ -64,7 +64,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
         <div class="h-14 flex items-center justify-between px-4 border-b flex-shrink-0"
           [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
           <div class="flex items-center gap-2">
-            <div style="width: 140px;">
+            <div style="width: 110px;">
               <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
             </div>
           </div>
@@ -489,7 +489,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     private http: HttpClient,
     private router: Router,
     private toastService: ToastService
-  ) {}
+  ) { }
 
   isDark = () => this.themeService.isDark();
   toggleTheme = () => this.themeService.toggleTheme();
@@ -793,7 +793,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   private scrollChat(): void {
-    try { this.chatContainer.nativeElement.scrollTop = this.chatContainer.nativeElement.scrollHeight; } catch {}
+    try { this.chatContainer.nativeElement.scrollTop = this.chatContainer.nativeElement.scrollHeight; } catch { }
   }
 
   ngOnDestroy(): void {

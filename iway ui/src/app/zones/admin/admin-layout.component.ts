@@ -20,7 +20,7 @@ import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
         [class]="isDark() ? 'bg-[#0F172A] border-slate-800' : 'bg-white border-slate-200'">
         <div class="p-5 border-b flex items-center gap-2"
           [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
-          <div style="width: 140px;">
+          <div style="width: 110px;">
             <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
           </div>
         </div>
@@ -131,7 +131,7 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
     private themeService: ThemeService,
     private wsService: WebSocketService,
     private router: Router
-  ) {}
+  ) { }
 
   isDark = () => this.themeService.isDark();
   toggleTheme = () => this.themeService.toggleTheme();
