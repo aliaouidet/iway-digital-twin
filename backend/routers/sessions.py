@@ -13,6 +13,7 @@ Routes:
 """
 
 import uuid
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -81,6 +82,10 @@ async def create_session(
         "last_ai_confidence": None,
     }
     logger.info(f"Session created: {session_id} for {matricule}")
+
+    # Persist to PostgreSQL (fire-and-forget)
+    asyncio.create_task(_persist_session_create(session_id, matricule))
+
     return {"session_id": session_id}
 
 
@@ -319,6 +324,10 @@ async def takeover_session(session_id: str, matricule: str = Depends(get_current
     if ws_ref.manager:
         await ws_ref.manager.broadcast({"type": "AGENT_JOINED", "payload": {"session_id": session_id, "agent": agent_name}})
     logger.info(f"Agent {matricule} took over session {session_id}")
+
+    # Persist status change (fire-and-forget)
+    asyncio.create_task(_persist_session_status(session_id, "agent_connected", matricule))
+
     return {"status": "taken_over", "session_id": session_id}
 
 
@@ -352,8 +361,8 @@ async def resolve_session(
             user = MOCK_USERS.get(matricule, {})
             agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip()
 
-            from backend.services.rag_service import add_hitl_knowledge
-            hitl_result = add_hitl_knowledge(
+            from backend.services.rag_service import async_add_hitl_knowledge
+            hitl_result = await async_add_hitl_knowledge(
                 session_id=session_id,
                 question=question,
                 answer=answer,
@@ -375,6 +384,9 @@ async def resolve_session(
         await ws_ref.manager.broadcast({"type": "SESSION_RESOLVED", "payload": {"session_id": session_id}})
 
     logger.info(f"Session {session_id} resolved by {matricule}")
+
+    # Persist resolution (fire-and-forget)
+    asyncio.create_task(_persist_session_status(session_id, "resolved"))
 
     result = {"status": "resolved"}
     if hitl_result:
@@ -460,13 +472,19 @@ async def _generate_briefing_summary(
         from backend.config import get_settings
         settings = get_settings()
         
+        # Use the same LLM patterns as agent.py to avoid import/config mismatches
         if settings.USE_LOCAL_LLM:
-            from langchain_community.chat_models import ChatOllama
-            llm = ChatOllama(model=settings.OLLAMA_MODEL, base_url=settings.OLLAMA_BASE_URL)
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(
+                base_url=settings.OLLAMA_BASE_URL,
+                api_key="ollama",
+                model=settings.OLLAMA_MODEL,
+                temperature=0.1,
+            )
         else:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(
-                model=settings.LLM_MODEL,
+                model="gemini-2.5-flash",
                 google_api_key=settings.GOOGLE_API_KEY,
                 temperature=0.1,
             )
@@ -480,14 +498,18 @@ Client: {user_name} ({user_role})
 Raison d'escalade: {reason or 'Non spécifiée'}
 
 Conversation:
-{conversation_excerpt}
+{conversation_excerpt[:3000]}
 
 Résumé pour l'agent (en français, 3-4 phrases max):"""
 
-        response = await llm.ainvoke([
-            SystemMessage(content="Tu résumes des conversations client pour les agents de support."),
-            HumanMessage(content=prompt),
-        ])
+        import asyncio
+        response = await asyncio.wait_for(
+            llm.ainvoke([
+                SystemMessage(content="Tu résumes des conversations client pour les agents de support."),
+                HumanMessage(content=prompt),
+            ]),
+            timeout=15.0,
+        )
         return response.content.strip()
 
     except Exception as e:
@@ -508,3 +530,40 @@ def _fallback_summary(user_name: str, user_role: str, reason: str, excerpt: str)
             summary += f"Escaladé car : {reason}."
         return summary
     return f"{user_name} ({user_role}) a contacté le support. Raison: {reason or 'non spécifiée'}."
+
+
+# ==============================================================
+# PERSISTENCE HELPERS (fire-and-forget dual-write to PostgreSQL)
+# ==============================================================
+
+async def _persist_session_create(session_id: str, user_matricule: str):
+    """Persist a new session to PostgreSQL. Silently fails if DB is unavailable."""
+    try:
+        from backend.database.connection import async_session_factory
+        from backend.database.repositories import create_session as db_create
+
+        async with async_session_factory() as db:
+            await db_create(db, session_id, user_matricule)
+            await db.commit()
+    except Exception as e:
+        logger.debug(f"Session DB persist skipped: {e}")
+
+
+async def _persist_session_status(
+    session_id: str,
+    status: str,
+    agent_matricule: str = None,
+):
+    """Persist session status change to PostgreSQL. Silently fails if DB is unavailable."""
+    try:
+        from backend.database.connection import async_session_factory
+        from backend.database.repositories import update_session_status
+
+        async with async_session_factory() as db:
+            await update_session_status(
+                db, session_id, status,
+                agent_matricule=agent_matricule,
+            )
+            await db.commit()
+    except Exception as e:
+        logger.debug(f"Session status DB persist skipped: {e}")

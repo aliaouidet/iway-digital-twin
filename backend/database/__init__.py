@@ -6,3 +6,4 @@ from backend.database.models import (
     UserRole, SessionStatus, MessageRole,
     EscalationPriority, SourceType, CorrectionType,
 )
+from backend.database import repositories

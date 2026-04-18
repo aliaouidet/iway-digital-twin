@@ -14,7 +14,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend.routers.auth import get_current_user, MOCK_USERS
+from backend.routers.auth import get_current_user, require_role, MOCK_USERS
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -35,7 +35,7 @@ class CorrectionInput(BaseModel):
 
 
 @router.post("")
-async def flag_ai_correction(data: CorrectionInput, matricule: str = Depends(get_current_user)):
+async def flag_ai_correction(data: CorrectionInput, matricule: str = Depends(require_role("Agent", "Admin"))):
     """
     Agent flags an incorrect AI response.
     This creates a correction record and fires an admin alert.
@@ -70,7 +70,7 @@ async def flag_ai_correction(data: CorrectionInput, matricule: str = Depends(get
 
 
 @router.get("")
-async def list_corrections(matricule: str = Depends(get_current_user)):
+async def list_corrections(matricule: str = Depends(require_role("Agent", "Admin"))):
     """List all AI corrections for admin review."""
     return {
         "corrections": CORRECTIONS,

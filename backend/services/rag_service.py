@@ -6,11 +6,17 @@ Supports two modes:
   2. pgvector (SQL-based vector search) — used with Docker Compose
 
 The service uses sentence-transformers for local embedding generation.
+
+IMPORTANT: All async code paths (FastAPI endpoints, WebSocket handlers)
+must use the async_* variants to avoid blocking the event loop.
+Sync variants are kept for Celery workers and startup code.
 """
 
+import asyncio
 import logging
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from backend.config import get_settings
@@ -33,18 +39,38 @@ def _get_model():
     return _model
 
 
+# --- Dedicated thread pool for CPU-bound embedding (avoids starving the default pool) ---
+_embed_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="embed")
+
+
 def embed_text(text: str) -> List[float]:
-    """Embed a single text string into a dense vector."""
+    """Embed a single text string (synchronous — for Celery workers and startup)."""
     model = _get_model()
     embedding = model.encode(text, normalize_embeddings=True)
     return embedding.tolist()
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
-    """Batch embed multiple texts (more efficient than one-by-one)."""
+    """Batch embed multiple texts (synchronous — for Celery workers and startup)."""
     model = _get_model()
     embeddings = model.encode(texts, normalize_embeddings=True, batch_size=32)
     return embeddings.tolist()
+
+
+async def async_embed_text(text: str) -> List[float]:
+    """Thread-pool-safe embedding for use inside async handlers.
+    
+    Runs the CPU-bound sentence-transformers encode() in a dedicated
+    thread pool so it never blocks the FastAPI event loop.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_embed_pool, embed_text, text)
+
+
+async def async_embed_texts(texts: List[str]) -> List[List[float]]:
+    """Thread-pool-safe batch embedding for async contexts."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_embed_pool, embed_texts, texts)
 
 
 # ==============================================================
@@ -271,16 +297,10 @@ def add_hitl_knowledge(session_id: str, question: str, answer: str,
 
 def retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
     """
-    Main RAG retrieval function. Returns relevant knowledge chunks for a query.
+    Main RAG retrieval function (synchronous — for Celery workers).
     
     Uses weighted similarity with HITL boost (hitl_validated entries get 1.15x).
-    
-    Args:
-        query: User's question
-        top_k: Number of results (defaults to settings.RAG_TOP_K)
-    
-    Returns:
-        List of {chunk_text, metadata, similarity, source_type, source_id}
+    For async code paths, use async_retrieve_context() instead.
     """
     if knowledge_store.count == 0:
         return []
@@ -295,6 +315,65 @@ def retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
     )
 
     return results
+
+
+async def async_retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
+    """
+    Async-safe RAG retrieval — won't block the event loop.
+    
+    Use this in all FastAPI endpoints and WebSocket handlers.
+    The embedding computation runs in a dedicated thread pool.
+    """
+    if knowledge_store.count == 0:
+        return []
+
+    k = top_k or settings.RAG_TOP_K
+    query_embedding = await async_embed_text(query)
+
+    results = knowledge_store.search(
+        query_embedding=query_embedding,
+        top_k=k,
+        hitl_boost=settings.HITL_BOOST_FACTOR,
+    )
+
+    return results
+
+
+async def async_add_hitl_knowledge(
+    session_id: str, question: str, answer: str,
+    agent_matricule: str, agent_name: str,
+    tags: List[str] = None,
+) -> Dict[str, Any]:
+    """
+    Async-safe version of add_hitl_knowledge.
+    Embeds and upserts a HITL-validated Q&A pair without blocking the event loop.
+    """
+    text = f"Question: {question}\nRéponse: {answer}"
+    embedding = await async_embed_text(text)
+
+    source_id = f"hitl-{session_id}"
+    knowledge_store.upsert(
+        source_id=source_id,
+        source_type="hitl_validated",
+        chunk_text=text,
+        embedding=embedding,
+        metadata={
+            "question": question,
+            "reponse": answer,
+            "session_id": session_id,
+            "agent_matricule": agent_matricule,
+            "agent_name": agent_name,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+            "tags": tags or [],
+        }
+    )
+
+    logger.info(f"🧠 HITL knowledge added from session {session_id} by {agent_name}")
+    return {
+        "status": "added",
+        "source_id": source_id,
+        "store_count": knowledge_store.count,
+    }
 
 
 def get_knowledge_stats() -> Dict[str, Any]:

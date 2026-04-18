@@ -196,6 +196,41 @@ trace_store = TraceStore(max_traces=500)
 
 
 # ==============================================================
+# PERSISTENCE HELPER — Dual-writes traces to PostgreSQL
+# ==============================================================
+
+async def persist_trace(trace: RequestTrace):
+    """Persist a completed trace to the audit_log table.
+    
+    Fire-and-forget: errors are logged but never propagate.
+    The in-memory store remains the source of truth for real-time display.
+    """
+    try:
+        from backend.database.connection import async_session_factory
+        from backend.database.repositories import save_audit_log
+
+        async with async_session_factory() as db:
+            await save_audit_log(
+                db=db,
+                trace_id=trace.trace_id,
+                event_type="user_query",
+                session_id=trace.session_id if trace.session_id else None,
+                outcome=trace.outcome,
+                latency_ms=round(trace.total_duration_ms) if trace.total_duration_ms else None,
+                model_used=trace.source_type,
+                confidence=trace.confidence,
+                events={
+                    "query": trace.query[:200],
+                    "spans": [s.to_dict() for s in trace.spans],
+                },
+            )
+            await db.commit()
+    except Exception as e:
+        # Never let persistence failure affect the hot path
+        logger.debug(f"Trace persistence skipped (DB not available): {e}")
+
+
+# ==============================================================
 # BROADCAST HELPER — Sends traces to WebSocket subscribers
 # ==============================================================
 
@@ -209,7 +244,15 @@ def set_trace_ws_manager(ws_manager):
 
 
 async def broadcast_trace(trace: RequestTrace):
-    """Broadcast a completed trace to all connected admin/agent dashboards."""
+    """Broadcast a completed trace to all connected admin/agent dashboards
+    and persist it to PostgreSQL for durability."""
+    # Persist to DB (fire-and-forget)
+    try:
+        await persist_trace(trace)
+    except Exception:
+        pass
+
+    # Broadcast to WebSocket subscribers
     if _ws_manager_ref:
         try:
             await _ws_manager_ref.broadcast({

@@ -109,6 +109,29 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(b
     return matricule
 
 
+def require_role(*allowed_roles: str):
+    """FastAPI dependency factory: verifies the user has one of the allowed roles.
+    
+    Usage:
+        @router.get("/admin/config")
+        async def admin_config(matricule: str = Depends(require_role("Admin"))):
+            ...
+    """
+    async def _check_role(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+        payload = verify_jwt(credentials.credentials)
+        matricule = payload.get("sub")
+        user = MOCK_USERS.get(matricule)
+        if not user:
+            raise HTTPException(status_code=403, detail="User not found")
+        if user["role"] not in allowed_roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Role '{user['role']}' not authorized. Required: {list(allowed_roles)}"
+            )
+        return matricule
+    return _check_role
+
+
 # --- Endpoints ---
 
 @router.post("/login")

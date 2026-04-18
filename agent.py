@@ -38,6 +38,9 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from bot_tools import (
     get_personal_dossiers,
+    get_beneficiaires_info,
+    get_prestations_history,
+    get_remboursements_status,
     search_knowledge_base,
     escalate_to_human,
     analyze_medical_receipt,
@@ -65,11 +68,14 @@ RÈGLES STRICTES :
 1. Tu parles TOUJOURS en français.
 2. Tu ne dois JAMAIS inventer des informations. Si tu ne connais pas la réponse, utilise l'outil `escalate_to_human`.
 3. Pour toute question sur les dossiers, contrats ou données personnelles de l'utilisateur, utilise l'outil `get_personal_dossiers`. Les identifiants sont injectés automatiquement — tu n'as PAS besoin de les fournir.
-4. Pour toute question sur les règles, plafonds, remboursements ou procédures d'assurance, utilise l'outil `search_knowledge_base`.
-5. Si l'utilisateur est mécontent, en colère, ou demande explicitement un agent humain, utilise IMMÉDIATEMENT l'outil `escalate_to_human` avec une description du problème.
-6. Tu peux utiliser PLUSIEURS outils en séquence pour répondre à une question complexe.
-7. Sois professionnel, empathique et concis dans tes réponses.
-8. Si l'utilisateur fournit une facture ou un reçu médical (image), utilise l'outil `analyze_medical_receipt` pour extraire les données (prestataire, montant, acte). Ensuite, utilise `search_knowledge_base` pour vérifier le taux de remboursement de cet acte, et enfin, calcule le montant estimé du remboursement pour l'utilisateur.
+4. Pour toute question sur les bénéficiaires (conjoint, enfants, ayants droit), utilise l'outil `get_beneficiaires_info`.
+5. Pour toute question sur l'historique des soins, consultations ou actes médicaux, utilise l'outil `get_prestations_history`.
+6. Pour toute question sur les remboursements en cours ou passés, utilise l'outil `get_remboursements_status`.
+7. Pour toute question sur les règles, plafonds, délais ou procédures d'assurance, utilise l'outil `search_knowledge_base`.
+8. Si l'utilisateur est mécontent, en colère, ou demande explicitement un agent humain, utilise IMMÉDIATEMENT l'outil `escalate_to_human` avec une description du problème.
+9. Tu peux utiliser PLUSIEURS outils en séquence pour répondre à une question complexe.
+10. Sois professionnel, empathique et concis dans tes réponses.
+11. Si l'utilisateur fournit une facture ou un reçu médical (image), utilise l'outil `analyze_medical_receipt` pour extraire les données (prestataire, montant, acte). Ensuite, utilise `search_knowledge_base` pour vérifier le taux de remboursement de cet acte, et enfin, calcule le montant estimé du remboursement pour l'utilisateur.
 
 CONTEXTE UTILISATEUR :
 - Matricule : {matricule}
@@ -87,7 +93,15 @@ class AgentState(TypedDict):
 
 # ── Tool Registry & Injection ────────────────────────────────
 
-TOOLS = [get_personal_dossiers, search_knowledge_base, escalate_to_human, analyze_medical_receipt]
+TOOLS = [
+    get_personal_dossiers,
+    get_beneficiaires_info,
+    get_prestations_history,
+    get_remboursements_status,
+    search_knowledge_base,
+    escalate_to_human,
+    analyze_medical_receipt,
+]
 TOOL_MAP = {t.name: t for t in TOOLS}
 
 # Pre-compute which tools need injected params (InjectedToolArg)

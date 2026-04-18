@@ -6,6 +6,11 @@
 #   docker compose up -d          # Start all services
 #   docker compose logs -f api    # Follow API logs
 #   docker compose down -v        # Stop + remove volumes
+#
+# Monitoring UIs:
+#   Flower       → http://localhost:5555  (Celery tasks)
+#   pgAdmin      → http://localhost:5050  (PostgreSQL)
+#   RedisInsight → http://localhost:5540  (Redis)
 # ============================================================
 
 services:
@@ -58,6 +63,9 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       MOCK_SERVER_URL: http://localhost:8000
+      IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
+      IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
+      IWAY_API_KEY: ${IWAY_API_KEY:-}
       OLLAMA_BASE_URL: http://ollama:11434/v1
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
@@ -73,7 +81,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # --- Celery Worker (background tasks: LLM inference, sync, embedding) ---
+  # --- Celery Worker (background tasks: sync, embedding) ---
   worker:
     build:
       context: .
@@ -85,6 +93,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
+      IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
+      IWAY_API_KEY: ${IWAY_API_KEY:-}
       OLLAMA_BASE_URL: http://ollama:11434/v1
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
@@ -93,6 +104,86 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Celery Beat (periodic task scheduler) ---
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iway-beat
+    command: celery -A backend.workers.celery_app beat --loglevel=info
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    volumes:
+      - .:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================
+  # MONITORING STACK
+  # ============================================================
+
+  # --- Flower (Celery Monitoring) ---
+  # URL: http://localhost:5555
+  # Shows: active tasks, worker status, task history, queues, graphs
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iway-flower
+    command: celery -A backend.workers.celery_app flower --port=5555 --broker_api=redis://redis:6379/1 --persistent=True --db=/data/flower.db
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    ports:
+      - "5555:5555"
+    volumes:
+      - .:/app
+      - flower_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- pgAdmin (PostgreSQL Monitoring & Administration) ---
+  # URL: http://localhost:5050
+  # Login: admin@iway.tn / admin
+  # Shows: query tool, table browser, server activity, dashboard graphs
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: iway-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@iway.tn
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./monitoring/pgadmin-servers.json:/pgadmin4/servers.json
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- RedisInsight (Redis Monitoring) ---
+  # URL: http://localhost:5540
+  # Shows: key browser, memory analysis, slow log, streams, pub/sub
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: iway-redisinsight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -134,4 +225,7 @@ volumes:
   pgdata:
   redisdata:
   frontend_node_modules:
+  flower_data:
+  pgadmin_data:
+  redisinsight_data:
   # ollama_models:

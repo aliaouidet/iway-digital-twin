@@ -44,7 +44,7 @@ interface ChatThread {
         <div class="h-16 flex items-center justify-between px-4 border-b flex-shrink-0"
           [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
           <div class="flex items-center gap-2">
-            <div style="width: 140px;">
+            <div style="width: 110px;">
               <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
             </div>
           </div>
@@ -366,7 +366,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   loadChatThreads(): void {
     this.http.get<ChatThread[]>(`${environment.apiUrl}/api/v1/sessions/user-chats`).subscribe({
       next: (chats) => this.chatThreads.set(chats),
-      error: () => {}
+      error: () => { }
     });
   }
 

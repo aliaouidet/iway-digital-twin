@@ -11,8 +11,8 @@ import logging
 
 from fastapi import APIRouter, Depends, Query
 
-from backend.routers.auth import get_current_user
-from backend.services.rag_service import retrieve_context, get_knowledge_stats
+from backend.routers.auth import get_current_user, require_role
+from backend.services.rag_service import async_retrieve_context, get_knowledge_stats
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -36,7 +36,7 @@ async def knowledge_search(
     Returns the top-k most relevant knowledge chunks with similarity scores.
     HITL-validated entries receive a 15% trust boost.
     """
-    results = retrieve_context(q, top_k=top_k)
+    results = await async_retrieve_context(q, top_k=top_k)
     return {
         "query": q,
         "results": results,
@@ -46,7 +46,7 @@ async def knowledge_search(
 
 
 @router.post("/sync")
-async def trigger_sync(matricule: str = Depends(get_current_user)):
+async def trigger_sync(matricule: str = Depends(require_role("Agent", "Admin"))):
     """Manually trigger a knowledge base sync from I-Way API."""
     from backend.workers.sync_worker import sync_knowledge_direct
     result = sync_knowledge_direct()

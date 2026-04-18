@@ -1,67 +1,155 @@
 """
 bot_tools.py — LangChain Tools for the I-Santé AI Agent.
 
-Three async tools the LLM can invoke:
-  1. get_personal_dossiers  → calls the Mock Server's protected /dossiers endpoint
-  2. search_knowledge_base  → FAISS semantic search on insurance rules
-  3. escalate_to_human      → creates an escalation ticket via the Mock Server
+Seven async tools the LLM can invoke:
+  1. get_personal_dossiers   → user's insurance contracts/coverage
+  2. get_beneficiaires_info  → user's family members (conjoint, enfants)
+  3. get_prestations_history → user's medical services history
+  4. get_remboursements_status → user's reimbursement tracking
+  5. search_knowledge_base   → semantic search on insurance rules (RAG)
+  6. escalate_to_human       → creates an escalation ticket
+  7. analyze_medical_receipt → OCR extraction via Gemini Vision
 
 Security: token and matricule are annotated with InjectedToolArg so they are
 HIDDEN from the LLM's tool schema. The custom tool_executor in agent.py injects
 them from AgentState at runtime.
+
+Performance: All API-calling tools use the shared iway_client which provides
+connection pooling via httpx.AsyncClient.
 """
 
-import os
+import json
 from typing import Annotated
-import httpx
-from dotenv import load_dotenv
+
 from langchain_core.tools import tool, InjectedToolArg
 
-load_dotenv()
 
-MOCK_SERVER_URL = os.getenv("MOCK_SERVER_URL", "http://localhost:8000")
-
-
-# ── Tool 1: Personal Dossiers (API) ──────────────────────────
+# ── Tool 1: Personal Dossiers ────────────────────────────────
 
 @tool
 async def get_personal_dossiers(
     matricule: Annotated[str, InjectedToolArg],
     token: Annotated[str, InjectedToolArg],
 ) -> str:
-    """Récupère les dossiers médicaux et administratifs d'un adhérent
+    """Récupère les dossiers d'assurance et contrats de l'adhérent
     depuis le système I-Way. Utilise cette fonction quand l'utilisateur
-    demande ses dossiers, contrats ou couvertures en cours."""
+    demande ses dossiers, contrats, formules ou couvertures en cours."""
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{MOCK_SERVER_URL}/api/v1/adherent/dossiers",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10,
-            )
-        if resp.status_code == 200:
-            return resp.text
-        return f"Erreur API: code {resp.status_code} — {resp.text}"
-    except httpx.ConnectError:
-        return "Erreur: impossible de joindre le serveur I-Way. Vérifiez qu'il est démarré."
+        from backend.services.iway_client import get_dossiers
+        data = await get_dossiers(token)
+        return json.dumps(data, ensure_ascii=False, indent=2)
     except Exception as e:
-        return f"Erreur inattendue: {e}"
+        return f"Erreur lors de la récupération des dossiers: {e}"
 
 
-# ── Tool 2: Knowledge Base / RAG ─────────────────────────────
+# ── Tool 2: Beneficiaries Info ───────────────────────────────
+
+@tool
+async def get_beneficiaires_info(
+    matricule: Annotated[str, InjectedToolArg],
+    token: Annotated[str, InjectedToolArg],
+) -> str:
+    """Récupère la liste des bénéficiaires (conjoint, enfants, parents à charge)
+    couverts par le contrat de l'adhérent. Utilise cette fonction quand
+    l'utilisateur pose des questions sur sa famille, ses ayants droit,
+    ou la couverture de ses enfants."""
+    try:
+        from backend.services.iway_client import get_beneficiaires
+        data = await get_beneficiaires(token)
+        if not data:
+            return "Aucun bénéficiaire enregistré sur votre contrat."
+        formatted = []
+        for b in data:
+            line = f"- {b.get('prenom', '')} {b.get('nom', '')} ({b.get('lien', 'N/A')})"
+            if b.get('date_naissance'):
+                line += f", né(e) le {b['date_naissance']}"
+            if b.get('scolarise'):
+                line += " (scolarisé)"
+            formatted.append(line)
+        return "Bénéficiaires enregistrés:\n" + "\n".join(formatted)
+    except Exception as e:
+        return f"Erreur lors de la récupération des bénéficiaires: {e}"
+
+
+# ── Tool 3: Prestations History ──────────────────────────────
+
+@tool
+async def get_prestations_history(
+    matricule: Annotated[str, InjectedToolArg],
+    token: Annotated[str, InjectedToolArg],
+) -> str:
+    """Récupère l'historique des prestations médicales et actes de soins.
+    Utilise cette fonction quand l'utilisateur demande ses consultations
+    récentes, actes médicaux passés, ou veut savoir quel médecin il a vu."""
+    try:
+        from backend.services.iway_client import get_prestations
+        data = await get_prestations(token)
+        if not data:
+            return "Aucune prestation enregistrée."
+        formatted = []
+        for p in data:
+            line = f"- [{p.get('date', 'N/A')}] {p.get('acte', 'N/A')}"
+            if p.get('medecin'):
+                line += f" — {p['medecin']}"
+            if p.get('montant') is not None:
+                line += f" — {p['montant']} TND"
+                if p.get('rembourse') is not None:
+                    line += f" (remboursé: {p['rembourse']} TND)"
+            line += f" — Statut: {p.get('statut', 'N/A')}"
+            formatted.append(line)
+        return "Historique des prestations:\n" + "\n".join(formatted)
+    except Exception as e:
+        return f"Erreur lors de la récupération des prestations: {e}"
+
+
+# ── Tool 4: Reimbursement Status ─────────────────────────────
+
+@tool
+async def get_remboursements_status(
+    matricule: Annotated[str, InjectedToolArg],
+    token: Annotated[str, InjectedToolArg],
+) -> str:
+    """Récupère l'état des remboursements (virements effectués et en attente).
+    Utilise cette fonction quand l'utilisateur demande où en est son
+    remboursement, combien il a été remboursé, ou le suivi de ses virements."""
+    try:
+        from backend.services.iway_client import get_remboursements
+        data = await get_remboursements(token)
+        if not data:
+            return "Aucun remboursement enregistré."
+        formatted = []
+        total_paid = 0
+        pending = 0
+        for r in data:
+            status_icon = "✅" if r.get("status") == "Payé" else "⏳"
+            line = f"- {status_icon} [{r.get('date', 'N/A')}] {r.get('montant', 0)} TND — {r.get('motif', 'N/A')} — {r.get('status', 'N/A')}"
+            formatted.append(line)
+            if r.get("status") == "Payé":
+                total_paid += r.get("montant", 0)
+            else:
+                pending += r.get("montant", 0)
+        summary = f"\n\nTotal remboursé: {total_paid} TND"
+        if pending > 0:
+            summary += f" | En attente: {pending} TND"
+        return "Suivi des remboursements:\n" + "\n".join(formatted) + summary
+    except Exception as e:
+        return f"Erreur lors de la récupération des remboursements: {e}"
+
+
+# ── Tool 5: Knowledge Base / RAG ─────────────────────────────
 
 @tool
 async def search_knowledge_base(query: str) -> str:
-    """Recherche dans la base de connaissances des regles et politiques
-    d'assurance I-Way en utilisant la recherche semantique.
-    Utilise cette fonction pour repondre aux questions sur les plafonds,
-    remboursements, delais, primes et procedures."""
+    """Recherche dans la base de connaissances des règles et politiques
+    d'assurance I-Way en utilisant la recherche sémantique.
+    Utilise cette fonction pour répondre aux questions sur les plafonds,
+    remboursements, délais, primes et procédures."""
     try:
-        from backend.services.rag_service import retrieve_context
-        results = retrieve_context(query, top_k=3)
+        from backend.services.rag_service import async_retrieve_context
+        results = await async_retrieve_context(query, top_k=3)
 
         if not results:
-            return "Aucune information trouvee dans la base de connaissances."
+            return "Aucune information trouvée dans la base de connaissances."
 
         formatted = []
         for i, res in enumerate(results, 1):
@@ -70,21 +158,16 @@ async def search_knowledge_base(query: str) -> str:
             question = metadata.get("question", "")
             reponse = metadata.get("reponse", res["chunk_text"])
             formatted.append(
-                f"[Resultat {i} — pertinence {similarity_pct}%]\n"
+                f"[Résultat {i} — pertinence {similarity_pct}%]\n"
                 f"Q: {question}\n"
                 f"R: {reponse}"
             )
         return "\n\n".join(formatted)
     except Exception as e:
-        # Fallback to rag_engine if backend is not available (standalone mode)
-        try:
-            import rag_engine
-            return rag_engine.search(query, k=3)
-        except Exception:
-            return f"Erreur lors de la recherche: {e}"
+        return f"Erreur lors de la recherche: {e}"
 
 
-# ── Tool 3: Escalation to Human Agent ────────────────────────
+# ── Tool 6: Escalation to Human Agent ────────────────────────
 
 @tool
 async def escalate_to_human(
@@ -97,37 +180,26 @@ async def escalate_to_human(
     répondre à la question, quand l'utilisateur est mécontent, ou quand
     il demande explicitement à parler à un humain."""
     try:
-        payload = {
-            "matricule": matricule,
-            "conversation_id": "conv-agent-auto",
-            "chat_history": [
+        from backend.services.iway_client import escalate_to_support
+        data = await escalate_to_support(
+            token=token,
+            matricule=matricule,
+            chat_history=[
                 {"role": "user", "content": issue_description},
                 {"role": "assistant", "content": "Je transfère votre demande à un agent humain."},
             ],
-            "reason": issue_description,
-        }
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{MOCK_SERVER_URL}/api/v1/support/escalade",
-                json=payload,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10,
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            return (
-                f"Escalade réussie ! Ticket créé : {data['case_id']}. "
-                f"Position dans la file : {data['queue_position']}. "
-                f"Temps d'attente estimé : {data['estimated_wait']}."
-            )
-        return f"Erreur lors de l'escalade: code {resp.status_code} — {resp.text}"
-    except httpx.ConnectError:
-        return "Erreur: impossible de joindre le serveur I-Way pour l'escalade."
+            reason=issue_description,
+        )
+        return (
+            f"Escalade réussie ! Ticket créé : {data.get('case_id', 'N/A')}. "
+            f"Position dans la file : {data.get('queue_position', 'N/A')}. "
+            f"Temps d'attente estimé : {data.get('estimated_wait', 'N/A')}."
+        )
     except Exception as e:
-        return f"Erreur inattendue lors de l'escalade: {e}"
+        return f"Erreur lors de l'escalade: {e}"
 
 
-# ── Tool 4: Medical Receipt OCR (Gemini Vision) ──────────────
+# ── Tool 7: Medical Receipt OCR (Gemini Vision) ──────────────
 
 OCR_EXTRACTION_PROMPT = """Analyse cette facture ou reçu médical et extrais les informations suivantes.
 Retourne UNIQUEMENT du JSON valide, sans commentaires ni texte supplémentaire.

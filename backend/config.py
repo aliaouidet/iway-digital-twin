@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     MOCK_SERVER_URL: str = "http://localhost:8000"
     SIMULATE_LATENCY: bool = False
 
+    # --- I-Way Real API ---
+    IWAY_USE_REAL_API: bool = False        # False = mock data, True = real I-Way API
+    IWAY_API_BASE_URL: str = "http://localhost:8000"  # Override with real URL
+    IWAY_API_KEY: str = ""                 # If I-Way uses API key auth
+
     # --- JWT ---
     JWT_ALGORITHM: str = "RS256"
     JWT_EXPIRATION_MINUTES: int = 60

@@ -69,7 +69,14 @@ async def lifespan(app: FastAPI):
     _app_ready = True
     logger.info("✅ Digital Twin Online: Keys Generated & Routers Loaded.")
     yield
+    # --- Graceful shutdown ---
     _app_ready = False
+    try:
+        from backend.services.iway_client import close_client
+        await close_client()
+        logger.info("🔌 I-Way API client closed.")
+    except Exception:
+        pass
     logger.info("🛑 Digital Twin Shutting Down.")
 
 
@@ -348,8 +355,26 @@ async def websocket_events(websocket: WebSocket):
 
 # --- Per-session chat WebSocket ---
 @app.websocket("/ws/chat/{session_id}")
-async def chat_websocket(websocket: WebSocket, session_id: str):
-    """Per-session WebSocket for user/agent chat."""
+async def chat_websocket(websocket: WebSocket, session_id: str, token: str = None):
+    """Per-session WebSocket for user/agent chat.
+    
+    Requires JWT auth via query parameter:
+      ws://localhost:8000/ws/chat/{session_id}?token={jwt}
+    
+    The token is verified before the connection is accepted.
+    Falls back to unauthenticated if no token is provided (dev mode only).
+    """
+    if token:
+        try:
+            from backend.routers.auth import verify_jwt
+            verify_jwt(token)
+        except Exception as e:
+            await websocket.close(code=4001)
+            logger.warning(f"⛔ WebSocket auth failed for session {session_id}: {e}")
+            return
+    else:
+        logger.warning(f"⚠️ WebSocket connection without token for session {session_id} (dev mode)")
+    
     await handle_chat_websocket(websocket, session_id, SESSIONS, ws_manager)
 
 

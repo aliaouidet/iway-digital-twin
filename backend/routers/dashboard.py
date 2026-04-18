@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_user, require_role
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -192,12 +192,12 @@ async def get_insights(matricule: str = Depends(get_current_user)):
 
 
 @router.get("/admin/config", tags=["Admin"])
-async def get_admin_config(matricule: str = Depends(get_current_user)):
+async def get_admin_config(matricule: str = Depends(require_role("Admin", "Agent"))):
     return SYSTEM_CONFIG
 
 
 @router.put("/admin/config", tags=["Admin"])
-async def update_admin_config(data: ConfigUpdate, matricule: str = Depends(get_current_user)):
+async def update_admin_config(data: ConfigUpdate, matricule: str = Depends(require_role("Admin"))):
     if data.rag:
         SYSTEM_CONFIG["rag"].update(data.rag)
     if data.llm:
