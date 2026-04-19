@@ -20,7 +20,10 @@ from typing import Dict, Any, Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.database.connection import get_db
+from backend.database.repositories import get_user_sessions, get_session_messages
 from backend.routers.auth import get_current_user, MOCK_USERS, bearer_scheme
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -114,8 +117,77 @@ async def get_active_sessions(matricule: str = Depends(get_current_user)):
 
 
 @router.get("/user-chats")
-async def get_user_chats(matricule: str = Depends(get_current_user)):
-    """List all chats for the current user (multi-chat support)."""
+async def get_user_chats(
+    matricule: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all chats for the current user (multi-chat support).
+    
+    Auto-cleans empty sessions older than 5 minutes to prevent ghost chats
+    from accumulating when users refresh the page.
+    """
+    now = datetime.now()
+    empty_session_ttl_seconds = 300  # 5 minutes
+
+    # ── Database Hydration ──
+    # Hydrate SESSIONS from the PostgreSQL DB in case this container just restarted.
+    try:
+        db_sessions = await get_user_sessions(db, matricule)
+        for db_sess in db_sessions:
+            sid = str(db_sess.id)
+            if sid not in SESSIONS:
+                # Load messages
+                db_msgs = await get_session_messages(db, sid)
+                history = []
+                for m in db_msgs:
+                    history.append({
+                        "role": m.role.value if hasattr(m.role, 'value') else m.role,
+                        "content": m.content,
+                        "timestamp": m.timestamp.isoformat() if m.timestamp else now.isoformat(),
+                        "confidence": m.confidence,
+                        "source": m.model_used,
+                    })
+                user = MOCK_USERS.get(matricule, {})
+                
+                # Check status
+                status_val = db_sess.status.value if hasattr(db_sess.status, 'value') else db_sess.status
+                
+                SESSIONS[sid] = {
+                    "id": sid,
+                    "user_matricule": matricule,
+                    "user_token": "", # Resurrected sessions don't retain old JWT payload
+                    "user_name": f"{user.get('prenom', '')} {user.get('nom', '')}".strip(),
+                    "user_role": user.get("role", "Unknown"),
+                    "status": status_val,
+                    "history": history,
+                    "created_at": db_sess.created_at.isoformat() if db_sess.created_at else now.isoformat(),
+                    "agent_matricule": db_sess.agent_matricule,
+                    "user_ws": None,
+                    "agent_ws": None,
+                    "reason": db_sess.reason,
+                }
+    except Exception as e:
+        logger.error(f"Failed to hydrate sessions from DB: {e}")
+
+    # Cleanup pass: remove this user's empty stale sessions
+    stale_ids = []
+    for sid, s in SESSIONS.items():
+        if s["user_matricule"] != matricule:
+            continue
+        if len(s["history"]) == 0 and s["status"] == "active":
+            try:
+                created = datetime.fromisoformat(s["created_at"])
+                age_seconds = (now - created).total_seconds()
+                if age_seconds > empty_session_ttl_seconds:
+                    stale_ids.append(sid)
+            except Exception:
+                pass
+
+    for sid in stale_ids:
+        del SESSIONS[sid]
+        logger.debug(f"🧹 Cleaned up empty stale session: {sid}")
+
+    # Build response
     chats = []
     for sid, s in SESSIONS.items():
         if s["user_matricule"] == matricule:

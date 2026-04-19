@@ -168,6 +168,7 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./monitoring/pgadmin-servers.json:/pgadmin4/servers.json
+      - ./monitoring/.pgpass:/pgadmin4/.pgpass:ro
     depends_on:
       db:
         condition: service_healthy

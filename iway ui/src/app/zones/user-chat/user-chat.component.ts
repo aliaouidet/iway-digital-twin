@@ -72,7 +72,7 @@ interface ChatThread {
 
         <!-- Chat List -->
         <div class="flex-1 overflow-y-auto px-3 space-y-1 custom-scrollbar">
-          <button *ngFor="let chat of chatThreads()" (click)="switchChat(chat)"
+          <button *ngFor="let chat of visibleThreads()" (click)="switchChat(chat)"
             class="w-full text-left p-3 rounded-xl transition-all cursor-pointer"
             [class]="getChatItemClass(chat)">
             <div class="flex items-center justify-between mb-1">
@@ -91,7 +91,7 @@ interface ChatThread {
               {{chat.message_count}} messages
             </span>
           </button>
-          <div *ngIf="chatThreads().length === 0" class="text-center py-8">
+          <div *ngIf="visibleThreads().length === 0" class="text-center py-8">
             <p class="text-xs" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">Aucune conversation</p>
           </div>
         </div>
@@ -159,7 +159,7 @@ interface ChatThread {
 
         <!-- Messages -->
         <div #messageContainer class="flex-1 overflow-y-auto px-4 py-6 space-y-4 custom-scrollbar">
-          <!-- Welcome -->
+          <!-- Welcome (no active session yet) -->
           <div *ngIf="messages().length === 0" class="flex flex-col items-center justify-center h-full text-center px-4">
             <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
               [class]="isDark() ? 'bg-indigo-500/10' : 'bg-indigo-50'">
@@ -354,7 +354,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   ngOnInit(): void {
     this.loadChatThreads();
-    this.createNewChat();
+    this.resumeLastActiveChat();
   }
 
   ngAfterViewChecked(): void {
@@ -370,6 +370,38 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     });
   }
 
+  /** Filter: hide empty sessions older than 5 minutes */
+  visibleThreads = () => {
+    const now = Date.now();
+    return this.chatThreads().filter(c => {
+      if (c.message_count > 0) return true;
+      // Keep empty sessions that are less than 5 min old (user might still be typing)
+      try {
+        const age = now - new Date(c.created_at).getTime();
+        return age < 5 * 60 * 1000;
+      } catch { return true; }
+    });
+  };
+
+  /**
+   * On page load: resume the most recent active chat instead of creating a new one.
+   * If no active chats exist, just show the welcome screen.
+   */
+  resumeLastActiveChat(): void {
+    this.http.get<ChatThread[]>(`${environment.apiUrl}/api/v1/sessions/user-chats`).subscribe({
+      next: (chats) => {
+        this.chatThreads.set(chats);
+        // Find the most recent non-resolved chat
+        const active = chats.find(c => c.status !== 'resolved' && c.message_count > 0);
+        if (active) {
+          this.switchChat(active);
+        }
+        // If no active chat, just show the welcome screen — no session created
+      },
+      error: () => { }
+    });
+  }
+
   createNewChat(): void {
     // Disconnect current
     this.socket$?.complete();
@@ -380,15 +412,11 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.agentName.set('');
     this.isSessionResolved.set(false);
     this.streamingContent = '';
+    this.sessionId = '';
 
-    this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
-      next: (res) => {
-        this.sessionId = res.session_id;
-        this.connectWebSocket();
-        this.loadChatThreads();
-      },
-      error: (err) => console.error('Failed to create session:', err)
-    });
+    // Don't create a backend session yet!
+    // It will be created lazily when the user sends their first message.
+    // This prevents empty ghost sessions on every button click.
   }
 
   switchChat(chat: ChatThread): void {
@@ -519,11 +547,31 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   sendMessage(): void {
-    if (!this.newMessage.trim() || !this.socket$) return;
+    if (!this.newMessage.trim()) return;
     const content = this.newMessage.trim();
     this.newMessage = '';
+
+    // Lazy session creation: if no session exists yet, create one first
+    if (!this.sessionId) {
+      this.messages.update(m => [...m, { role: 'user', content }]);
+      this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
+        next: (res) => {
+          this.sessionId = res.session_id;
+          this.connectWebSocket();
+          this.loadChatThreads();
+          // Wait for WS connection before sending
+          setTimeout(() => {
+            this.socket$?.next({ type: 'user_message', content });
+          }, 500);
+        },
+        error: (err) => console.error('Failed to create session:', err)
+      });
+      return;
+    }
+
+    // Normal path: session already exists
     this.messages.update(m => [...m, { role: 'user', content }]);
-    this.socket$.next({ type: 'user_message', content });
+    this.socket$?.next({ type: 'user_message', content });
   }
 
   sendQuickQuestion(q: string): void {

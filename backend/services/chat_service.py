@@ -47,6 +47,25 @@ def get_session_lock(session_id: str) -> asyncio.Lock:
     return _session_locks[session_id]
 
 
+async def _persist_message(
+    session_id: str,
+    role: str,
+    content: str,
+    confidence: float = None,
+    model_used: str = None,
+):
+    """Fire-and-forget message persistence to PostgreSQL."""
+    try:
+        from backend.database.connection import async_session_factory
+        from backend.database.repositories import save_message
+
+        async with async_session_factory() as db:
+            await save_message(db, session_id, role, content, confidence, model_used)
+            await db.commit()
+    except Exception as e:
+        logger.debug(f"Message DB persist skipped: {e}")
+
+
 # ==============================================================
 # LANGGRAPH AGENT (lazy-loaded to avoid startup failure)
 # ==============================================================
@@ -341,6 +360,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                 user_msg = {"role": "user", "content": content, "timestamp": datetime.now().isoformat()}
                 async with lock:
                     session["history"].append(user_msg)
+                asyncio.create_task(_persist_message(session_id, "user", content))
 
                 if session["status"] == "agent_connected":
                     # Relay to human agent
@@ -419,6 +439,10 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "confidence": confidence,
                             "is_handoff_ai": True,
                         })
+                        asyncio.create_task(_persist_message(
+                            session_id, "assistant", response_text, 
+                            confidence=confidence, model_used=ai_result.get("source", "handoff_ai")
+                        ))
                         session["last_ai_confidence"] = confidence
 
                         trace.finish("HANDOFF_AI_RESOLVED", confidence=confidence)
@@ -510,6 +534,10 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "confidence": ai_result["confidence"],
                             "source": "langgraph_agent",
                         })
+                        asyncio.create_task(_persist_message(
+                            session_id, "assistant", ai_result["text"], 
+                            confidence=ai_result["confidence"], model_used="langgraph_agent"
+                        ))
                         session["last_ai_confidence"] = ai_result["confidence"]
                         trace.finish(
                             "AGENT_RESOLVED",
@@ -536,6 +564,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "content": ai_result["text"],
                                 "timestamp": datetime.now().isoformat()
                             })
+                            asyncio.create_task(_persist_message(session_id, "system", ai_result["text"]))
                         await websocket.send_json({
                             "type": "handoff_started",
                             "reason": session["reason"],
@@ -570,11 +599,13 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             session["last_ai_confidence"] = ai_result["confidence"]
                             session["status"] = "handoff_pending"
                             session["reason"] = f"Low confidence ({ai_result['confidence']}%) on: {content[:50]}"
+                            sys_msg = "Un agent va vous rejoindre bientôt. Vous pouvez continuer à poser des questions en attendant."
                             session["history"].append({
                                 "role": "system",
-                                "content": "Un agent va vous rejoindre bientôt. Vous pouvez continuer à poser des questions en attendant.",
+                                "content": sys_msg,
                                 "timestamp": datetime.now().isoformat()
                             })
+                            asyncio.create_task(_persist_message(session_id, "system", sys_msg))
                         await websocket.send_json({
                             "type": "handoff_started",
                             "reason": session["reason"],
@@ -618,6 +649,10 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "confidence": ai_result["confidence"],
                                 "source": ai_result.get("source", "simulated"),
                             })
+                            asyncio.create_task(_persist_message(
+                                session_id, "assistant", response_text, 
+                                confidence=ai_result["confidence"], model_used=ai_result.get("source", "simulated")
+                            ))
                             session["last_ai_confidence"] = ai_result["confidence"]
                         span_stream.finish(tokens=len(words))
                         trace.finish(
@@ -636,6 +671,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     continue
                 agent_msg = {"role": "agent", "content": content, "timestamp": datetime.now().isoformat()}
                 session["history"].append(agent_msg)
+                asyncio.create_task(_persist_message(session_id, "agent", content))
                 user_ws = session.get("user_ws")
                 if user_ws:
                     try:
@@ -646,11 +682,13 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
             elif msg_type == "manual_handoff_request":
                 session["status"] = "handoff_pending"
                 session["reason"] = "User manually requested a human agent"
+                sys_msg_manual = "Vous avez demande a parler a un agent humain. Transfert en cours..."
                 session["history"].append({
                     "role": "system",
-                    "content": "Vous avez demande a parler a un agent humain. Transfert en cours...",
+                    "content": sys_msg_manual,
                     "timestamp": datetime.now().isoformat()
                 })
+                asyncio.create_task(_persist_message(session_id, "system", sys_msg_manual))
                 await websocket.send_json({"type": "handoff_started", "reason": session["reason"], "keep_chatting": True})
                 await ws_manager.broadcast({
                     "type": "NEW_ESCALATION",

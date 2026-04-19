@@ -113,6 +113,16 @@ async def get_active_sessions(db: AsyncSession) -> List[SessionModel]:
     return list(result.scalars().all())
 
 
+async def get_user_sessions(db: AsyncSession, matricule: str) -> List[SessionModel]:
+    """Get all sessions for a specific user."""
+    result = await db.execute(
+        select(SessionModel)
+        .where(SessionModel.user_matricule == matricule)
+        .order_by(SessionModel.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 # ==============================================================
 # MESSAGES
 # ==============================================================
