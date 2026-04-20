@@ -137,6 +137,30 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
       })
     );
+
+    // Listen for real-time escalation events
+    this.subs.push(
+      this.wsService.getEscalationUpdates().subscribe(() => {
+        const current = this.metrics();
+        if (current) {
+          this.metrics.set({
+            ...current,
+            human_escalated: current.human_escalated + 1,
+          });
+          this.buildCharts({ ...current, human_escalated: current.human_escalated + 1 });
+        }
+      })
+    );
+
+    // Listen for session lifecycle events (new sessions, resolved)
+    this.subs.push(
+      this.wsService.getSessionUpdates().subscribe(event => {
+        if (event.type === 'SESSION_RESOLVED') {
+          // Refresh metrics to reflect resolved session
+          this.loadMetrics();
+        }
+      })
+    );
   }
 
   private loadMetrics(): void {
