@@ -12,6 +12,7 @@ ENV/
 # Environment variables
 .env
 
+
 # Distribution / packaging
 dist/
 build/
@@ -56,3 +57,8 @@ logs/
 *.pdf
 
 
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
