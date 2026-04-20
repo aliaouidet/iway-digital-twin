@@ -1,8 +1,10 @@
-import { Component, OnInit, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 import { TicketService } from '../../../core/services/ticket.service';
 import { LogsService } from '../../../core/services/logs.service';
+import { WebSocketService } from '../../../core/services/websocket.service';
 import { LogEntry } from '../../../shared/models';
 
 @Component({
@@ -156,7 +158,7 @@ import { LogEntry } from '../../../shared/models';
     </div>
   `
 })
-export class TicketsComponent implements OnInit {
+export class TicketsComponent implements OnInit, OnDestroy {
   tickets = signal<LogEntry[]>([]);
   selectedTicket = signal<LogEntry | null>(null);
   activeFilter = signal('all');
@@ -171,7 +173,12 @@ export class TicketsComponent implements OnInit {
     return all.filter(t => t.outcome === filter);
   });
 
-  constructor(private logsService: LogsService) {}
+  private subs: Subscription[] = [];
+
+  constructor(
+    private logsService: LogsService,
+    private wsService: WebSocketService
+  ) {}
 
   ngOnInit(): void {
     this.logsService.getLogs({ page_size: 50 }).subscribe({
@@ -185,6 +192,56 @@ export class TicketsComponent implements OnInit {
       },
       error: () => this.isLoading.set(false)
     });
+
+    // Real-time: new pipeline traces
+    this.subs.push(
+      this.wsService.getTraceUpdates().subscribe(trace => {
+        if (trace && trace.query) {
+          const newEntry: LogEntry = {
+            id: crypto.randomUUID(),
+            query: trace.query || 'Unknown query',
+            outcome: trace.outcome || 'AI_FALLBACK',
+            confidence: trace.confidence || 0,
+            timestamp: trace.created_at || new Date().toISOString(),
+            user_id: trace.user_matricule || '',
+            model: trace.model_used || 'gemini-2.5-flash',
+            tokens_used: trace.tokens_used || 0,
+            top_similarity: trace.top_similarity || 0,
+            chunks_retrieved: trace.chunks_retrieved || 0,
+            gen_time_ms: trace.latency_ms || 0,
+          };
+          this.tickets.update(t => [newEntry, ...t]);
+          this.buildFilterTabs();
+        }
+      })
+    );
+
+    // Real-time: new escalations
+    this.subs.push(
+      this.wsService.getEscalationUpdates().subscribe(escalation => {
+        if (escalation) {
+          const newEntry: LogEntry = {
+            id: crypto.randomUUID(),
+            query: escalation.reason || 'Escalation',
+            outcome: 'HUMAN_ESCALATED',
+            confidence: 0,
+            timestamp: escalation.created_at || new Date().toISOString(),
+            user_id: escalation.user_name || '',
+            model: 'langgraph_agent',
+            tokens_used: 0,
+            top_similarity: 0,
+            chunks_retrieved: 0,
+            gen_time_ms: 0,
+          };
+          this.tickets.update(t => [newEntry, ...t]);
+          this.buildFilterTabs();
+        }
+      })
+    );
+  }
+
+  ngOnDestroy(): void {
+    this.subs.forEach(s => s.unsubscribe());
   }
 
   private buildFilterTabs(): void {

@@ -78,6 +78,27 @@ export class WebSocketService implements OnDestroy {
     );
   }
 
+  getEscalationUpdates(): Observable<any> {
+    return this.messages$.pipe(
+      filter(msg => msg.type === 'NEW_ESCALATION'),
+      map(msg => msg.payload)
+    );
+  }
+
+  getSessionUpdates(): Observable<any> {
+    return this.messages$.pipe(
+      filter(msg => ['NEW_SESSION', 'AGENT_JOINED', 'SESSION_RESOLVED'].includes(msg.type)),
+      map(msg => ({ type: msg.type, ...msg.payload }))
+    );
+  }
+
+  getTraceUpdates(): Observable<any> {
+    return this.messages$.pipe(
+      filter(msg => msg.type === 'NEW_TRACE'),
+      map(msg => msg.payload)
+    );
+  }
+
   sendMessage(msg: WsMessage): void {
     if (this.socket$ && !this.socket$.closed) {
       this.socket$.next(msg);

@@ -520,30 +520,108 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
 
                     # Handle agent-streamed responses (already sent tokens)
                     if ai_result.get("source") == "langgraph_agent":
-                        span_eval.finish(status="agent_resolved")
-                        await websocket.send_json({
-                            "type": "ai_done",
-                            "confidence": ai_result["confidence"],
-                            "source": "langgraph_agent",
-                            "tools_called": ai_result.get("tools_called", []),
-                        })
-                        session["history"].append({
-                            "role": "assistant",
-                            "content": ai_result["text"],
-                            "timestamp": datetime.now().isoformat(),
-                            "confidence": ai_result["confidence"],
-                            "source": "langgraph_agent",
-                        })
-                        asyncio.create_task(_persist_message(
-                            session_id, "assistant", ai_result["text"], 
-                            confidence=ai_result["confidence"], model_used="langgraph_agent"
-                        ))
-                        session["last_ai_confidence"] = ai_result["confidence"]
-                        trace.finish(
-                            "AGENT_RESOLVED",
-                            confidence=ai_result["confidence"],
-                            source_type="langgraph_agent",
-                        )
+                        tools_called = ai_result.get("tools_called", [])
+
+                        # ═══ ESCALATION INTERCEPT ═══
+                        # If the agent called escalate_to_human, we must actually
+                        # transition the session to handoff_pending — not just
+                        # send a text response.
+                        if "escalate_to_human" in tools_called:
+                            span_eval.finish(status="escalation_intercepted")
+
+                            # Store AI response in history
+                            async with lock:
+                                session["history"].append({
+                                    "role": "assistant",
+                                    "content": ai_result["text"],
+                                    "timestamp": datetime.now().isoformat(),
+                                    "confidence": ai_result["confidence"],
+                                    "source": "langgraph_agent",
+                                })
+                                asyncio.create_task(_persist_message(
+                                    session_id, "assistant", ai_result["text"],
+                                    confidence=ai_result["confidence"], model_used="langgraph_agent"
+                                ))
+
+                                # Transition session state
+                                session["status"] = "handoff_pending"
+                                session["reason"] = f"Agent tool escalation: {content[:80]}"
+                                session["trigger_message"] = {
+                                    "content": ai_result["text"],
+                                    "confidence": ai_result["confidence"],
+                                    "query": content,
+                                }
+                                session["last_ai_confidence"] = ai_result["confidence"]
+
+                                sys_msg = "Un agent humain va vous rejoindre bientôt. Vous pouvez continuer à poser des questions en attendant."
+                                session["history"].append({
+                                    "role": "system",
+                                    "content": sys_msg,
+                                    "timestamp": datetime.now().isoformat(),
+                                })
+                                asyncio.create_task(_persist_message(session_id, "system", sys_msg))
+
+                            # Tell the user the handoff is happening
+                            await websocket.send_json({
+                                "type": "ai_done",
+                                "confidence": ai_result["confidence"],
+                                "source": "langgraph_agent",
+                                "tools_called": tools_called,
+                            })
+                            await websocket.send_json({
+                                "type": "handoff_started",
+                                "reason": session["reason"],
+                                "keep_chatting": True,
+                            })
+
+                            # Notify agent dashboard in real time
+                            await ws_manager.broadcast({
+                                "type": "NEW_ESCALATION",
+                                "payload": {
+                                    "session_id": session_id,
+                                    "user_name": session["user_name"],
+                                    "user_role": session["user_role"],
+                                    "reason": session["reason"],
+                                    "created_at": session["created_at"],
+                                }
+                            })
+
+                            # Persist status change to DB
+                            asyncio.create_task(_persist_escalation(
+                                session_id, session["reason"]
+                            ))
+
+                            trace.finish(
+                                "HUMAN_ESCALATED",
+                                confidence=ai_result["confidence"],
+                                source_type="langgraph_agent",
+                            )
+                        else:
+                            # ═══ NORMAL AGENT RESOLVED ═══
+                            span_eval.finish(status="agent_resolved")
+                            await websocket.send_json({
+                                "type": "ai_done",
+                                "confidence": ai_result["confidence"],
+                                "source": "langgraph_agent",
+                                "tools_called": tools_called,
+                            })
+                            session["history"].append({
+                                "role": "assistant",
+                                "content": ai_result["text"],
+                                "timestamp": datetime.now().isoformat(),
+                                "confidence": ai_result["confidence"],
+                                "source": "langgraph_agent",
+                            })
+                            asyncio.create_task(_persist_message(
+                                session_id, "assistant", ai_result["text"],
+                                confidence=ai_result["confidence"], model_used="langgraph_agent"
+                            ))
+                            session["last_ai_confidence"] = ai_result["confidence"]
+                            trace.finish(
+                                "AGENT_RESOLVED",
+                                confidence=ai_result["confidence"],
+                                source_type="langgraph_agent",
+                            )
 
                     # Handle degraded responses (timeout/circuit open)
                     elif ai_result.get("degraded"):
@@ -738,3 +816,20 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
             handle_agent_disconnect(session, sessions_store)
         else:
             handle_user_disconnect(session)
+
+
+async def _persist_escalation(session_id: str, reason: str):
+    """Fire-and-forget: persist escalation status change to PostgreSQL."""
+    try:
+        from backend.database.connection import async_session_factory
+        from backend.database.repositories import update_session_status
+
+        async with async_session_factory() as db:
+            await update_session_status(
+                db, session_id, "handoff_pending",
+                reason=reason,
+            )
+            await db.commit()
+    except Exception as e:
+        logger.debug(f"Escalation DB persist skipped: {e}")
+

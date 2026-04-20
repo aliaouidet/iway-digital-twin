@@ -89,6 +89,20 @@ async def create_session(
     # Persist to PostgreSQL (fire-and-forget)
     asyncio.create_task(_persist_session_create(session_id, matricule))
 
+    # Notify agent dashboard in real time
+    if ws_ref.manager:
+        await ws_ref.manager.broadcast({
+            "type": "NEW_SESSION",
+            "payload": {
+                "session_id": session_id,
+                "user_matricule": matricule,
+                "user_name": SESSIONS[session_id]["user_name"],
+                "user_role": SESSIONS[session_id]["user_role"],
+                "status": "active",
+                "created_at": SESSIONS[session_id]["created_at"],
+            }
+        })
+
     return {"session_id": session_id}
 
 
