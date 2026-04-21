@@ -1,9 +1,10 @@
-import { Injectable, OnDestroy } from '@angular/core';
+import { Injectable, OnDestroy, signal } from '@angular/core';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
 import { Observable, Subject, EMPTY, timer } from 'rxjs';
 import { catchError, filter, map, retry, share, switchMap, takeUntil } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { RealtimeMetricUpdate } from '../../shared/models';
+import { QueueItem } from '../../shared/models/chat.interface';
 
 export interface WsMessage {
   type: string;
@@ -15,6 +16,8 @@ export class WebSocketService implements OnDestroy {
   private socket$: WebSocketSubject<WsMessage> | null = null;
   private destroy$ = new Subject<void>();
   private messages$ = new Subject<WsMessage>();
+  private _sidebarQueue = signal<QueueItem[]>([]);
+  public sidebarQueue = this._sidebarQueue.asReadonly();
 
   connect(): void {
     if (this.socket$ && !this.socket$.closed) {
@@ -43,7 +46,10 @@ export class WebSocketService implements OnDestroy {
       }),
       takeUntil(this.destroy$)
     ).subscribe({
-      next: (msg) => this.messages$.next(msg),
+      next: (msg) => {
+        this.messages$.next(msg);
+        this.handleSidebarUpdates(msg);
+      },
       error: (err) => console.error('[WebSocket] Stream error:', err),
     });
 
@@ -57,6 +63,47 @@ export class WebSocketService implements OnDestroy {
     if (this.socket$) {
       this.socket$.complete();
       this.socket$ = null;
+    }
+  }
+
+  setInitialQueue(items: QueueItem[]): void {
+    this._sidebarQueue.set(items);
+  }
+
+  private handleSidebarUpdates(msg: WsMessage): void {
+    // Listen for sidebar_update or related escalation events to prepend/update the queue
+    if (msg.type === 'sidebar_update' || msg.type === 'NEW_ESCALATION' || msg.type === 'SESSION_UPDATED') {
+      const payload = msg.payload || {};
+      const newItem: QueueItem = {
+        ...payload,
+        id: payload.id || payload.session_id,
+        status: payload.status || (msg.type === 'NEW_ESCALATION' ? 'handoff_pending' : 'active'),
+        message_count: payload.message_count || 0,
+        last_message: payload.last_message || '',
+        agent_matricule: payload.agent_matricule || null,
+        user_matricule: payload.user_matricule || '',
+      };
+      
+      if (!newItem.id) return;
+      
+      this._sidebarQueue.update(queue => {
+        const index = queue.findIndex(item => item.id === newItem.id);
+        if (index > -1) {
+          // If it exists, update it
+          const updatedQueue = [...queue];
+          updatedQueue[index] = { ...updatedQueue[index], ...newItem };
+          return updatedQueue;
+        } else {
+          // If it does not exist, prepend it immediately
+          return [newItem, ...queue];
+        }
+      });
+    } else if (msg.type === 'SESSION_RESOLVED') {
+      // Remove resolved sessions from queue
+      const resolvedId = msg.payload?.id || msg.payload?.session_id;
+      if (resolvedId) {
+        this._sidebarQueue.update(queue => queue.filter(item => item.id !== resolvedId));
+      }
     }
   }
 

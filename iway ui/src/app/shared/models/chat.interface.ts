@@ -18,3 +18,17 @@ export interface ConversationThread {
   time: string;
   unread: number;
 }
+
+export interface QueueItem {
+  id: string;
+  user_name: string;
+  user_role: string;
+  user_matricule: string;
+  status: string;
+  created_at: string;
+  reason: string | null;
+  message_count: number;
+  last_message: string;
+  agent_matricule: string | null;
+  last_ai_confidence: number | null;
+}

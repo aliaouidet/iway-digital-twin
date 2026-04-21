@@ -131,8 +131,14 @@ async def get_agent_response(query: str, session: dict, websocket: WebSocket, ha
                     # Only stream final response tokens (not intermediate reasoning)
                     # Check if we're in the final chatbot node
                     if not (hasattr(chunk, "tool_calls") and chunk.tool_calls):
-                        full_response += chunk.content
-                        await websocket.send_json({"type": "ai_token", "token": chunk.content})
+                        content_val = chunk.content
+                        if isinstance(content_val, list):
+                            content_str = "".join([c.get("text", "") if isinstance(c, dict) else str(c) for c in content_val])
+                        else:
+                            content_str = str(content_val)
+                            
+                        full_response += content_str
+                        await websocket.send_json({"type": "ai_token", "token": content_str})
 
             elif kind == "on_tool_start":
                 tool_name = event.get("name", "unknown")
