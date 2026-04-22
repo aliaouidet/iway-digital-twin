@@ -65,6 +65,7 @@ def _cleanup_session_lock(session_id: str):
 # RAG-ONLY AI RESPONSE (Fallback Path — no LLM reasoning)
 # ==============================================================
 
+
 async def get_rag_ai_response(query: str) -> dict:
     """
     Generate an AI response using RAG similarity lookup only.

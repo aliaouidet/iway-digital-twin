@@ -239,4 +239,5 @@ volumes:
   flower_data:
   pgadmin_data:
   redisinsight_data:
+  hf_cache:
   # ollama_models:
