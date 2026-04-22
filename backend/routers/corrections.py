@@ -62,10 +62,24 @@ async def flag_ai_correction(data: CorrectionInput, matricule: str = Depends(req
         f"type={data.correction_type}, session={data.session_id}"
     )
 
+    # --- Dispatch Celery task: re-embed the corrected Q&A into RAG ---
+    try:
+        from backend.workers.hitl_worker import embed_hitl_feedback
+        embed_hitl_feedback.delay(
+            session_id=data.session_id,
+            question=data.wrong_message_content,
+            corrected_answer=data.correct_answer,
+            agent_matricule=matricule,
+            agent_name=agent_name,
+        )
+        logger.info(f"[HITL] 📨 Celery task dispatched for correction {correction['id']}")
+    except Exception as e:
+        logger.warning(f"[HITL] Celery dispatch failed (non-critical): {e}")
+
     return {
         "status": "flagged",
         "correction_id": correction["id"],
-        "message": "AI response flagged as incorrect. It will NOT be added to the knowledge base.",
+        "message": "AI response flagged. Corrected answer is being re-embedded into the knowledge base.",
     }
 
 

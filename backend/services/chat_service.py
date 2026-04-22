@@ -322,6 +322,19 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     span_recv.finish()
 
                     ai_result = None
+                    cache_hit = False
+
+                    # -- TIER 0: Redis Cache (instant response) --
+                    try:
+                        from backend.services.response_cache import get_cached_response
+                        cached = await get_cached_response(content)
+                        if cached:
+                            cache_hit = True
+                            ai_result = cached
+                            span_cache = trace.start_span("CACHE_HIT")
+                            span_cache.finish(source="cache")
+                    except Exception:
+                        pass  # Cache miss — proceed to graph
 
                     # -- TIER 1: Claims StateGraph (primary) --
                     if llm_circuit.can_execute():
@@ -594,6 +607,26 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     # --- Store & broadcast trace ---
                     trace_store.add(trace)
                     await broadcast_trace(trace)
+
+                    # --- Cache store (only for high-confidence, non-cached responses) ---
+                    if not cache_hit and ai_result and ai_result.get("confidence", 0) >= 70:
+                        try:
+                            from backend.services.response_cache import set_cached_response
+                            asyncio.create_task(set_cached_response(content, ai_result))
+                        except Exception:
+                            pass
+
+                    # --- Analytics (fire-and-forget) ---
+                    try:
+                        from backend.services.analytics import record_query
+                        asyncio.create_task(record_query(
+                            matricule=session.get("user_matricule"),
+                            intent=ai_result.get("intent") if ai_result else None,
+                            confidence=ai_result.get("confidence") if ai_result else None,
+                            cache_hit=cache_hit,
+                        ))
+                    except Exception:
+                        pass
 
             elif msg_type == "agent_message":
                 content = msg.get("content", "").strip()

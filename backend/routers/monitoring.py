@@ -105,3 +105,17 @@ async def get_knowledge_gaps():
         "gaps": gaps[:50],
         "top_missing_topics": [{"topic": t, "count": c} for t, c in top_topics],
     }
+
+
+# --- Real-Time Analytics (Redis Counters) ---
+@router.get("/api/v1/stats/realtime")
+async def get_realtime_stats():
+    """
+    Real-time analytics from Redis atomic counters.
+    O(1) reads — no trace scanning, no DB queries.
+
+    Returns: queries_today, escalations, cache_hits, unique_users,
+             avg_confidence, top_intents, cache_hit_rate.
+    """
+    from backend.services.analytics import get_realtime_stats
+    return await get_realtime_stats()

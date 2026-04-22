@@ -33,6 +33,9 @@ celery_app.conf.update(
     task_time_limit=120,       # Hard kill after 2 minutes
     task_soft_time_limit=90,   # Raise SoftTimeLimitExceeded after 90s
     
+    # Result backend (redis-development/ram-ttl rule)
+    result_expires=3600,       # Auto-cleanup results after 1 hour
+    
     # Worker
     worker_prefetch_multiplier=1,  # Fair scheduling for GPU tasks
     worker_max_tasks_per_child=50, # Recycle workers to prevent memory leaks
@@ -42,8 +45,11 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
-# Auto-discover tasks in the workers package
-celery_app.autodiscover_tasks(["backend.workers"])
+# Explicit task module registration (autodiscover can miss tasks in Docker)
+celery_app.conf.include = [
+    "backend.workers.sync_worker",
+    "backend.workers.hitl_worker",
+]
 
 
 # --- Periodic Tasks (Celery Beat) ---

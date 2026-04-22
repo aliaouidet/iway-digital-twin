@@ -75,12 +75,24 @@ async def lifespan(app: FastAPI):
     logger.info("🧠 Initializing Claims StateGraph...")
     await init_claims_graph_async()
 
+    # --- Redis connection pool (caching + analytics) ---
+    try:
+        from backend.services.redis_client import get_redis
+        await get_redis()
+    except Exception as e:
+        logger.warning(f"⚠️ Redis pool init failed (non-critical): {e}")
+
     global _app_ready
     _app_ready = True
     logger.info("✅ Digital Twin Online: Keys Generated, Graph Compiled, Routers Loaded.")
     yield
     # --- Graceful shutdown ---
     _app_ready = False
+    try:
+        from backend.services.redis_client import close_redis
+        await close_redis()
+    except Exception:
+        pass
     try:
         from backend.services.iway_client import close_client
         await close_client()

@@ -199,23 +199,27 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
     # -- Parse LLM self-assessed confidence --
     llm_confidence, clean_response = _parse_confidence(raw_response)
 
-    # -- Multi-Signal Confidence Fusion --
-    # Combines 3 signal types to produce a more reliable score:
-    #   1. RAG similarity (objective, most reliable)  — weight 0.50
-    #   2. LLM self-assessment (subjective)           — weight 0.20
-    #   3. Data signal: DB records or field status     — weight 0.30
-    rag_confidence = state.get("rag_confidence", 0.0) or 0.0
+    # -- Confidence Scoring --
+    # NOTE: Multi-signal fusion is temporarily disabled because RAG
+    # similarity scores are unreliable with the current small knowledge
+    # base (e.g., 0.29 similarity drags fused confidence to 0.49,
+    # causing unnecessary handoffs). Using LLM self-assessment only
+    # until embedding quality improves.
+    #
+    # To re-enable fusion, uncomment the block below:
+    # rag_confidence = state.get("rag_confidence", 0.0) or 0.0
+    # confidence = _fuse_confidence(
+    #     llm_score=llm_confidence,
+    #     rag_similarity=rag_confidence,
+    #     has_db_data=bool(system_records),
+    #     claim_details=claim_details,
+    # )
 
-    confidence = _fuse_confidence(
-        llm_score=llm_confidence,
-        rag_similarity=rag_confidence,
-        has_db_data=bool(system_records),
-        claim_details=claim_details,
-    )
+    confidence = llm_confidence  # LLM self-assessment only
 
     logger.info(
-        f"Confidence fusion: RAG={rag_confidence:.2f}, LLM={llm_confidence:.2f} "
-        f"-> fused={confidence:.2f}"
+        f"Confidence: LLM self-assessment={llm_confidence:.2f} "
+        f"(fusion disabled — using LLM only)"
     )
 
     # Track which tools/paths were used
