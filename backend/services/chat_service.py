@@ -1,19 +1,18 @@
 """
-Chat Service — Per-session WebSocket handler with LangGraph Agent + Resilience.
+Chat Service — Per-session WebSocket handler with LangGraph Claims Pipeline.
 
 Architecture:
-  PRIMARY PATH:  LangGraph Agent (Gemini/Ollama LLM + BotTools)
+  PRIMARY PATH:  12-node Claims StateGraph (Gemini/Ollama LLM + DB tools + RAG)
   FALLBACK PATH: RAG-only similarity lookup (no LLM reasoning)
 
 Resilience features:
-- Agent initialization failure → graceful fallback to RAG-only
+- Graph initialization failure → graceful fallback to RAG-only
 - LLM timeout → auto-escalate to human agent
 - Circuit breaker → prevents cascading LLM/embedding failures
-- Agent disconnect → re-queues session for another agent
-- User disconnect → preserves state for reconnection
-- Graceful degradation → fallback responses when services are down
 - Per-session locks → prevent race conditions on concurrent mutations
-- Sliding window → prevents LLM context window overflow
+
+NOTE: Graph execution logic is in graph_executor.py.
+      DB persistence logic is in message_persister.py.
 """
 
 import json
@@ -35,6 +34,14 @@ from backend.services.resilience import (
 from backend.services.tracing import (
     RequestTrace, trace_store, broadcast_trace,
 )
+from backend.services.graph_executor import (
+    execute_claims_graph, init_claims_graph_async,
+)
+from backend.services.message_persister import (
+    persist_message as _persist_message,
+    persist_escalation as _persist_escalation,
+    build_agent_messages as _build_agent_messages,
+)
 
 logger = logging.getLogger("I-Way-Twin")
 settings = get_settings()
@@ -47,166 +54,11 @@ def get_session_lock(session_id: str) -> asyncio.Lock:
     return _session_locks[session_id]
 
 
-async def _persist_message(
-    session_id: str,
-    role: str,
-    content: str,
-    confidence: float = None,
-    model_used: str = None,
-):
-    """Fire-and-forget message persistence to PostgreSQL."""
-    try:
-        from backend.database.connection import async_session_factory
-        from backend.database.repositories import save_message
-
-        async with async_session_factory() as db:
-            await save_message(db, session_id, role, content, confidence, model_used)
-            await db.commit()
-    except Exception as e:
-        logger.debug(f"Message DB persist skipped: {e}")
-
-
-# ==============================================================
-# LANGGRAPH AGENT (lazy-loaded to avoid startup failure)
-# ==============================================================
-
-_shared_agent = None
-_agent_available = False
-
-
-def _get_agent():
-    """Lazy-load the LangGraph agent. Returns None if unavailable."""
-    global _shared_agent, _agent_available
-    if _shared_agent is not None:
-        return _shared_agent
-    if not _agent_available and _shared_agent is None:
-        try:
-            from agent import build_agent_graph
-            _shared_agent = build_agent_graph()
-            _agent_available = True
-            logger.info("🤖 LangGraph Agent loaded successfully")
-        except Exception as e:
-            _agent_available = False
-            logger.warning(f"⚠️ LangGraph Agent unavailable (falling back to RAG-only): {e}")
-    return _shared_agent
-
-
-# ==============================================================
-# AGENTIC AI RESPONSE (Primary Path — LangGraph + Tools)
-# ==============================================================
-
-async def get_agent_response(query: str, session: dict, websocket: WebSocket, handoff_mode: bool = False) -> dict:
-    """
-    Generate a response using the full LangGraph agent with tool calling.
-    
-    When handoff_mode=True, the agent uses an empathetic tone acknowledging
-    that a human agent is on the way.
-    """
-    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-
-    agent = _get_agent()
-    if agent is None:
-        return None  # Signal to caller to use fallback
-
-    # Build messages with sliding window to prevent context overflow
-    lc_history = _build_agent_messages(session, handoff_mode=handoff_mode)
-    
-    initial_state = {
-        "messages": lc_history,
-        "matricule": session.get("user_matricule", "12345"),
-        "token": session.get("user_token", ""),
-    }
-    config = {"configurable": {"thread_id": f"ws-session-{session['id']}"}}
-
-    full_response = ""
-    tools_called = []
-
-    try:
-        async for event in agent.astream_events(initial_state, config=config, version="v1"):
-            kind = event["event"]
-
-            if kind == "on_chat_model_stream":
-                chunk = event["data"].get("chunk")
-                if chunk and hasattr(chunk, "content") and chunk.content:
-                    # Only stream final response tokens (not intermediate reasoning)
-                    # Check if we're in the final chatbot node
-                    if not (hasattr(chunk, "tool_calls") and chunk.tool_calls):
-                        full_response += chunk.content
-                        await websocket.send_json({"type": "ai_token", "token": chunk.content})
-
-            elif kind == "on_tool_start":
-                tool_name = event.get("name", "unknown")
-                tools_called.append(tool_name)
-                # Show user what tool is being called
-                tool_labels = {
-                    "search_knowledge_base": "🔍 Recherche dans la base de connaissances...",
-                    "get_personal_dossiers": "📋 Consultation de vos dossiers...",
-                    "escalate_to_human": "👤 Transfert vers un agent...",
-                    "analyze_medical_receipt": "🧾 Analyse de la facture médicale...",
-                }
-                status_text = tool_labels.get(tool_name, f"⚙️ {tool_name}...")
-                await websocket.send_json({"type": "thinking", "status": status_text})
-
-            elif kind == "on_tool_end":
-                pass  # Tool results are processed by the agent internally
-
-        if full_response.strip():
-            return {
-                "text": full_response.strip(),
-                "confidence": 90,  # Agent responses are generally high-confidence
-                "source": "langgraph_agent",
-                "tools_called": tools_called,
-                "degraded": False,
-            }
-        else:
-            return None  # Empty response — fall back
-
-    except Exception as e:
-        logger.error(f"❌ Agent execution failed: {e}")
-        llm_circuit.record_failure()
-        return None  # Signal fallback
-
-
-# ==============================================================
-# SLIDING WINDOW — Prevents LLM context overflow
-# ==============================================================
-
-def _build_agent_messages(session: dict, handoff_mode: bool = False, max_turns: int = 10):
-    """Build LangChain messages with a sliding window to prevent context overflow.
-    
-    Keeps the most recent `max_turns` user/assistant exchanges.
-    Always preserves the first user message for context anchoring.
-    Truncates long assistant responses (tool results can be huge JSON).
-    """
-    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-
-    lc_history = []
-
-    if handoff_mode:
-        lc_history.append(SystemMessage(content=(
-            "IMPORTANT: Un agent humain est en route pour aider le client. "
-            "Adopte un ton empathique et rassurant. "
-            "Aide autant que possible en attendant l'agent."
-        )))
-
-    # Filter to user/assistant messages only (skip system messages)
-    chat_messages = [h for h in session.get("history", []) if h["role"] in ("user", "assistant")]
-    
-    # Sliding window: keep first message + last N messages
-    if len(chat_messages) > max_turns * 2:
-        windowed = chat_messages[:1] + chat_messages[-(max_turns * 2 - 1):]
-    else:
-        windowed = chat_messages
-
-    for h in windowed:
-        if h["role"] == "user":
-            lc_history.append(HumanMessage(content=h["content"]))
-        elif h["role"] == "assistant":
-            # Truncate long assistant responses (tool results can be huge)
-            content = h["content"][:2000] if len(h["content"]) > 2000 else h["content"]
-            lc_history.append(AIMessage(content=content))
-
-    return lc_history
+def _cleanup_session_lock(session_id: str):
+    """Remove the per-session lock when the session's last WS disconnects."""
+    if session_id in _session_locks:
+        del _session_locks[session_id]
+        logger.debug(f"🧹 Cleaned up session lock for {session_id}")
 
 
 # ==============================================================
@@ -373,8 +225,8 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             await websocket.send_json({"type": "handoff_started", "reason": "Agent disconnected — re-queued"})
 
                 elif session["status"] == "handoff_pending":
-                    # ═══ HYBRID HANDOFF: AI continues with empathetic tone ═══
-                    await websocket.send_json({"type": "thinking", "status": "Réflexion en cours..."})
+                    # Graph handles this via pre_intake_router → stall_node
+                    await websocket.send_json({"type": "thinking", "status": "Réflexion en cours...", "node": "stall"})
 
                     trace = RequestTrace(
                         session_id=session_id,
@@ -386,40 +238,37 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
 
                     ai_result = None
 
-                    # Try agent first, then RAG, then simulated — same 3-tier
                     if llm_circuit.can_execute():
-                        span_agent = trace.start_span("HANDOFF_AI_RESPONSE")
+                        span_graph = trace.start_span("GRAPH_STALL_EXECUTION")
                         try:
                             ai_result = await asyncio.wait_for(
-                                get_agent_response(content, session, websocket, handoff_mode=True),
+                                execute_claims_graph(content, session, websocket),
                                 timeout=settings.LLM_TIMEOUT_SECONDS + 10
                             )
                             if ai_result:
-                                span_agent.finish(source="langgraph_agent_handoff")
+                                span_graph.finish(source="claims_graph_stall")
                                 llm_circuit.record_success()
                             else:
-                                span_agent.finish(status="agent_unavailable")
+                                span_graph.finish(status="graph_unavailable")
                         except asyncio.TimeoutError:
-                            span_agent.finish(status="timeout")
+                            span_graph.finish(status="timeout")
                             llm_circuit.record_failure()
                         except Exception as e:
-                            span_agent.finish(status="error", error=str(e))
+                            span_graph.finish(status="error", error=str(e))
 
                     if ai_result is None:
-                        from backend.services.rag_service import knowledge_store
-                        if knowledge_store.count > 0:
-                            ai_result = await get_rag_ai_response(content)
-                        else:
-                            await asyncio.sleep(0.3 + random.random() * 0.3)
-                            ai_result = get_simulated_ai_response(content)
+                        ai_result = {
+                            "text": "Je comprends votre impatience. Un agent va vous répondre très bientôt.",
+                            "confidence": 0,
+                            "source": "fallback",
+                        }
 
-                    # Send response with handoff_ai flag
                     if ai_result and ai_result.get("text"):
                         response_text = ai_result["text"]
                         confidence = ai_result.get("confidence", 50)
 
-                        # Stream tokens if not already streamed by agent
-                        if ai_result.get("source") != "langgraph_agent":
+                        # Stream tokens if not already streamed by graph
+                        if ai_result.get("source") != "claims_graph":
                             words = response_text.split(" ")
                             for i, word in enumerate(words):
                                 token = word + (" " if i < len(words) - 1 else "")
@@ -428,8 +277,9 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
 
                         await websocket.send_json({
                             "type": "ai_done",
+                            "text": response_text,
                             "confidence": confidence,
-                            "is_handoff_ai": True,  # UI shows badge
+                            "is_handoff_ai": True,
                             "source": ai_result.get("source", "handoff_ai"),
                         })
                         session["history"].append({
@@ -440,12 +290,11 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "is_handoff_ai": True,
                         })
                         asyncio.create_task(_persist_message(
-                            session_id, "assistant", response_text, 
+                            session_id, "assistant", response_text,
                             confidence=confidence, model_used=ai_result.get("source", "handoff_ai")
                         ))
                         session["last_ai_confidence"] = confidence
-
-                        trace.finish("HANDOFF_AI_RESOLVED", confidence=confidence)
+                        trace.finish("STALL_RESOLVED", confidence=confidence)
                     else:
                         await websocket.send_json({
                             "type": "ai_done",
@@ -453,14 +302,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             "is_handoff_ai": True,
                             "text": "Je comprends votre frustration. Un agent va vous répondre très bientôt.",
                         })
-                        trace.finish("HANDOFF_AI_FALLBACK", confidence=0)
+                        trace.finish("STALL_FALLBACK", confidence=0)
 
                     trace_store.add(trace)
                     await broadcast_trace(trace)
 
                 else:
-                    # === NORMAL AI RESPONSE FLOW (session.status == "active") ===
-                    await websocket.send_json({"type": "thinking"})
+                    # === PRIMARY AI FLOW (session.status == "active") ===
+                    await websocket.send_json({"type": "thinking", "status": "Analyse de votre demande...", "node": "intake"})
 
                     # --- Start trace ---
                     trace = RequestTrace(
@@ -473,31 +322,32 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
 
                     ai_result = None
 
-                    # ── TIER 1: LangGraph Agent (primary) ──
+                    # -- TIER 1: Claims StateGraph (primary) --
                     if llm_circuit.can_execute():
-                        span_agent = trace.start_span("AGENT_EXECUTION")
+                        span_graph = trace.start_span("GRAPH_EXECUTION")
                         try:
                             ai_result = await asyncio.wait_for(
-                                get_agent_response(content, session, websocket),
-                                timeout=settings.LLM_TIMEOUT_SECONDS + 10
+                                execute_claims_graph(content, session, websocket),
+                                timeout=settings.LLM_TIMEOUT_SECONDS + 15
                             )
                             if ai_result:
-                                span_agent.finish(
+                                span_graph.finish(
                                     tools=ai_result.get("tools_called", []),
-                                    source="langgraph_agent",
+                                    source="claims_graph",
+                                    intent=ai_result.get("intent"),
                                 )
                                 llm_circuit.record_success()
                             else:
-                                span_agent.finish(status="agent_unavailable")
+                                span_graph.finish(status="graph_unavailable")
                         except asyncio.TimeoutError:
-                            span_agent.finish(status="timeout")
+                            span_graph.finish(status="timeout")
                             llm_circuit.record_failure()
-                            logger.warning("⏰ Agent timed out — falling back to RAG")
+                            logger.warning("Graph timed out — falling back to RAG")
                         except Exception as e:
-                            span_agent.finish(status="error", error=str(e))
-                            logger.warning(f"⚠️ Agent error: {e} — falling back to RAG")
+                            span_graph.finish(status="error", error=str(e))
+                            logger.warning(f"Graph error: {e} — falling back to RAG")
 
-                    # ── TIER 2: RAG-only fallback ──
+                    # -- TIER 2: RAG-only fallback --
                     if ai_result is None:
                         from backend.services.rag_service import knowledge_store
                         if knowledge_store.count > 0:
@@ -509,7 +359,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 degraded=ai_result.get("degraded", False),
                             )
                         else:
-                            # ── TIER 3: Simulated response (no RAG store) ──
+                            # -- TIER 3: Simulated response (no RAG store) --
                             span_sim = trace.start_span("SIMULATED_RESPONSE")
                             await asyncio.sleep(0.5 + random.random() * 0.5)
                             ai_result = get_simulated_ai_response(content)
@@ -518,40 +368,39 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     # --- Evaluate & respond ---
                     span_eval = trace.start_span("EVAL", confidence=ai_result.get("confidence"))
 
-                    # Handle agent-streamed responses (already sent tokens)
-                    if ai_result.get("source") == "langgraph_agent":
+                    # Handle graph responses (tokens already streamed)
+                    if ai_result.get("source") == "claims_graph":
+                        claim_status = ai_result.get("claim_status", "active")
                         tools_called = ai_result.get("tools_called", [])
+                        confidence = ai_result.get("confidence", 0)
 
-                        # ═══ ESCALATION INTERCEPT ═══
-                        # If the agent called escalate_to_human, we must actually
-                        # transition the session to handoff_pending — not just
-                        # send a text response.
-                        if "escalate_to_human" in tools_called:
-                            span_eval.finish(status="escalation_intercepted")
+                        # ═══ ESCALATION / HANDOFF INTERCEPT ═══
+                        if claim_status == "pending_human":
+                            span_eval.finish(status="escalation_via_graph")
 
-                            # Store AI response in history
                             async with lock:
                                 session["history"].append({
                                     "role": "assistant",
                                     "content": ai_result["text"],
                                     "timestamp": datetime.now().isoformat(),
-                                    "confidence": ai_result["confidence"],
-                                    "source": "langgraph_agent",
+                                    "confidence": confidence,
+                                    "source": "claims_graph",
                                 })
                                 asyncio.create_task(_persist_message(
                                     session_id, "assistant", ai_result["text"],
-                                    confidence=ai_result["confidence"], model_used="langgraph_agent"
+                                    confidence=confidence, model_used="claims_graph"
                                 ))
 
                                 # Transition session state
                                 session["status"] = "handoff_pending"
-                                session["reason"] = f"Agent tool escalation: {content[:80]}"
+                                session["reason"] = f"Graph escalation (confidence: {confidence}%): {content[:80]}"
                                 session["trigger_message"] = {
                                     "content": ai_result["text"],
-                                    "confidence": ai_result["confidence"],
+                                    "confidence": confidence,
                                     "query": content,
+                                    "intent": ai_result.get("intent"),
                                 }
-                                session["last_ai_confidence"] = ai_result["confidence"]
+                                session["last_ai_confidence"] = confidence
 
                                 sys_msg = "Un agent humain va vous rejoindre bientôt. Vous pouvez continuer à poser des questions en attendant."
                                 session["history"].append({
@@ -561,12 +410,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 })
                                 asyncio.create_task(_persist_message(session_id, "system", sys_msg))
 
-                            # Tell the user the handoff is happening
+                            # Tell the user
                             await websocket.send_json({
                                 "type": "ai_done",
-                                "confidence": ai_result["confidence"],
-                                "source": "langgraph_agent",
+                                "text": ai_result["text"],
+                                "confidence": confidence,
+                                "source": "claims_graph",
                                 "tools_called": tools_called,
+                                "intent": ai_result.get("intent"),
                             })
                             await websocket.send_json({
                                 "type": "handoff_started",
@@ -583,44 +434,46 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                     "user_role": session["user_role"],
                                     "reason": session["reason"],
                                     "created_at": session["created_at"],
+                                    "intent": ai_result.get("intent"),
                                 }
                             })
 
-                            # Persist status change to DB
                             asyncio.create_task(_persist_escalation(
                                 session_id, session["reason"]
                             ))
 
                             trace.finish(
                                 "HUMAN_ESCALATED",
-                                confidence=ai_result["confidence"],
-                                source_type="langgraph_agent",
+                                confidence=confidence,
+                                source_type="claims_graph",
                             )
                         else:
-                            # ═══ NORMAL AGENT RESOLVED ═══
-                            span_eval.finish(status="agent_resolved")
+                            # ═══ NORMAL GRAPH RESOLVED ═══
+                            span_eval.finish(status="graph_resolved")
                             await websocket.send_json({
                                 "type": "ai_done",
-                                "confidence": ai_result["confidence"],
-                                "source": "langgraph_agent",
+                                "text": ai_result["text"],
+                                "confidence": confidence,
+                                "source": "claims_graph",
                                 "tools_called": tools_called,
+                                "intent": ai_result.get("intent"),
                             })
                             session["history"].append({
                                 "role": "assistant",
                                 "content": ai_result["text"],
                                 "timestamp": datetime.now().isoformat(),
-                                "confidence": ai_result["confidence"],
-                                "source": "langgraph_agent",
+                                "confidence": confidence,
+                                "source": "claims_graph",
                             })
                             asyncio.create_task(_persist_message(
                                 session_id, "assistant", ai_result["text"],
-                                confidence=ai_result["confidence"], model_used="langgraph_agent"
+                                confidence=confidence, model_used="claims_graph"
                             ))
-                            session["last_ai_confidence"] = ai_result["confidence"]
+                            session["last_ai_confidence"] = confidence
                             trace.finish(
-                                "AGENT_RESOLVED",
-                                confidence=ai_result["confidence"],
-                                source_type="langgraph_agent",
+                                "GRAPH_RESOLVED",
+                                confidence=confidence,
+                                source_type="claims_graph",
                             )
 
                     # Handle degraded responses (timeout/circuit open)
@@ -628,7 +481,6 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         span_eval.finish(status="degraded", failure_type=ai_result.get("failure_type"))
                         trace.finish("DEGRADED", confidence=0)
 
-                        # Store trigger message
                         async with lock:
                             session["trigger_message"] = {
                                 "content": ai_result["text"],
@@ -666,7 +518,6 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         span_eval.finish(status="low_confidence")
                         trace.finish("HUMAN_ESCALATED", confidence=ai_result["confidence"])
 
-                        # Store the trigger message for agent review
                         trigger_text = ai_result.get("text") or "Réponse insuffisante — confidence trop basse"
                         async with lock:
                             session["trigger_message"] = {
@@ -712,7 +563,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                             await websocket.send_json({"type": "ai_token", "token": token})
                             await asyncio.sleep(0.03 + random.random() * 0.05)
 
-                        done_payload = {"type": "ai_done", "confidence": ai_result["confidence"]}
+                        done_payload = {"type": "ai_done", "text": ai_result["text"], "confidence": ai_result["confidence"]}
                         if ai_result.get("source"):
                             done_payload["source"] = ai_result["source"]
                         if ai_result.get("hitl_boosted"):
@@ -728,7 +579,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "source": ai_result.get("source", "simulated"),
                             })
                             asyncio.create_task(_persist_message(
-                                session_id, "assistant", response_text, 
+                                session_id, "assistant", response_text,
                                 confidence=ai_result["confidence"], model_used=ai_result.get("source", "simulated")
                             ))
                             session["last_ai_confidence"] = ai_result["confidence"]
@@ -808,6 +659,8 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                 })
         else:
             handle_user_disconnect(session)
+        # Clean up per-session lock to prevent memory leak
+        _cleanup_session_lock(session_id)
         logger.info(f"Chat WS disconnected from session {session_id} (agent={is_agent})")
 
     except Exception as e:
@@ -816,20 +669,5 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
             handle_agent_disconnect(session, sessions_store)
         else:
             handle_user_disconnect(session)
-
-
-async def _persist_escalation(session_id: str, reason: str):
-    """Fire-and-forget: persist escalation status change to PostgreSQL."""
-    try:
-        from backend.database.connection import async_session_factory
-        from backend.database.repositories import update_session_status
-
-        async with async_session_factory() as db:
-            await update_session_status(
-                db, session_id, "handoff_pending",
-                reason=reason,
-            )
-            await db.commit()
-    except Exception as e:
-        logger.debug(f"Escalation DB persist skipped: {e}")
-
+        # Clean up per-session lock to prevent memory leak
+        _cleanup_session_lock(session_id)

@@ -15,7 +15,6 @@ import asyncio
 import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
-from collections import defaultdict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -30,7 +29,11 @@ from backend.routers.sessions import router as sessions_router, SESSIONS, set_ws
 from backend.routers.dashboard import router as dashboard_router, SYSTEM_LOGS
 from backend.routers.knowledge import router as knowledge_router
 from backend.routers.corrections import router as corrections_router
+from backend.routers.monitoring import router as monitoring_router
+from backend.routers.feedback import router as feedback_router
 from backend.services.chat_service import handle_chat_websocket
+from backend.services.graph_executor import init_claims_graph_async
+from backend.services.ws_manager import ConnectionManager
 
 # --- Configuration & Logging ---
 settings = get_settings()
@@ -40,8 +43,11 @@ logger = logging.getLogger("I-Way-Twin")
 # --- Readiness Gate ---
 _app_ready = False
 
+# --- WebSocket Manager (singleton) ---
+ws_manager = ConnectionManager()
 
-# --- Lifespan (RSA Key Generation) ---
+
+# --- Lifespan (RSA Key Generation + Graph Init) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🔐 Generating RSA 2048-bit Key Pair...")
@@ -65,9 +71,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Initial knowledge sync failed (non-critical): {e}")
 
+    # --- Claims StateGraph initialization (Phase 5) ---
+    logger.info("🧠 Initializing Claims StateGraph...")
+    await init_claims_graph_async()
+
     global _app_ready
     _app_ready = True
-    logger.info("✅ Digital Twin Online: Keys Generated & Routers Loaded.")
+    logger.info("✅ Digital Twin Online: Keys Generated, Graph Compiled, Routers Loaded.")
     yield
     # --- Graceful shutdown ---
     _app_ready = False
@@ -107,32 +117,8 @@ app.include_router(sessions_router)
 app.include_router(dashboard_router)
 app.include_router(knowledge_router)
 app.include_router(corrections_router)
-
-
-# --- WebSocket Manager ---
-class ConnectionManager:
-    """Manages active WebSocket connections and broadcasts events."""
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket connected. Active: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info(f"WebSocket disconnected. Active: {len(self.active_connections)}")
-
-    async def broadcast(self, message: dict):
-        for connection in list(self.active_connections):
-            try:
-                await connection.send_json(message)
-            except Exception:
-                pass
-
-ws_manager = ConnectionManager()
+app.include_router(monitoring_router)
+app.include_router(feedback_router)
 
 
 # --- System Root ---
@@ -183,135 +169,13 @@ async def health_check():
 # --- Readiness Probe (for Docker/K8s startup checks) ---
 @app.get("/ready", tags=["System"])
 async def readiness_probe():
-    """Returns 200 only when the app is fully initialized (keys + model + knowledge loaded)."""
+    """Returns 200 only when the app is fully initialized."""
     if not _app_ready:
         return JSONResponse(
             status_code=503,
             content={"status": "starting", "message": "Application is still initializing..."}
         )
     return {"status": "ready", "timestamp": datetime.now().isoformat()}
-
-
-# --- CSAT Feedback ---
-_feedback_store: list[dict] = []
-
-@app.post("/api/v1/sessions/{session_id}/feedback", tags=["Sessions"])
-async def submit_feedback(session_id: str, body: dict):
-    """
-    Submit CSAT feedback after session resolved.
-    Body: { rating: 'positive' | 'negative', comment?: string }
-    """
-    if session_id not in SESSIONS:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    rating = body.get("rating", "positive")
-    comment = body.get("comment", "")
-    feedback = {
-        "session_id": session_id,
-        "rating": rating,
-        "comment": comment,
-        "timestamp": datetime.now().isoformat(),
-    }
-    _feedback_store.append(feedback)
-    SESSIONS[session_id]["feedback"] = feedback
-    logger.info(f"📊 CSAT feedback for {session_id}: {rating}")
-    return {"status": "received", "rating": rating}
-
-
-@app.get("/api/v1/feedback/stats", tags=["Monitoring"])
-async def feedback_stats():
-    """Get aggregated CSAT stats for the admin dashboard."""
-    total = len(_feedback_store)
-    positive = sum(1 for f in _feedback_store if f["rating"] == "positive")
-    negative = sum(1 for f in _feedback_store if f["rating"] == "negative")
-    return {
-        "total": total,
-        "positive": positive,
-        "negative": negative,
-        "csat_score": round(positive / max(total, 1) * 100, 1),
-        "recent": _feedback_store[-10:],
-    }
-
-
-# --- Knowledge Gaps ---
-@app.get("/api/v1/knowledge/gaps", tags=["Monitoring"])
-async def get_knowledge_gaps():
-    """
-    Returns questions where AI had low confidence or escalated.
-    Admin can use this to identify missing documentation topics.
-    """
-    from backend.services.tracing import trace_store
-    gaps: list[dict] = []
-    topic_counts: dict[str, int] = defaultdict(int)
-
-    for trace in trace_store._traces:
-        if trace.outcome in ("HUMAN_ESCALATED", "AI_FALLBACK", "DEGRADED") or (
-            trace.confidence is not None and trace.confidence < 0.5
-        ):
-            gaps.append({
-                "query": trace.query,
-                "confidence": trace.confidence,
-                "outcome": trace.outcome,
-                "session_id": trace.session_id,
-                "timestamp": trace.created_at,
-            })
-            # Simple keyword extraction for topic clustering
-            words = trace.query.lower().split()
-            for w in words:
-                if len(w) > 4:  # Skip short/common words
-                    topic_counts[w] += 1
-
-    # Sort topics by frequency
-    top_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:15]
-
-    return {
-        "total_gaps": len(gaps),
-        "gaps": gaps[:50],
-        "top_missing_topics": [{"topic": t, "count": c} for t, c in top_topics],
-    }
-
-
-# --- Resilience Status ---
-@app.get("/api/v1/resilience", tags=["Monitoring"])
-async def resilience_status():
-    """Get detailed resilience status — circuit breakers, fallback state."""
-    from backend.services.resilience import get_resilience_status
-    from backend.services.rag_service import get_knowledge_stats
-    return {
-        **get_resilience_status(),
-        "knowledge": get_knowledge_stats(),
-        "active_ws_connections": len(ws_manager.active_connections),
-        "active_sessions": len([s for s in SESSIONS.values() if s["status"] != "resolved"]),
-        "pending_handoffs": len([s for s in SESSIONS.values() if s["status"] == "handoff_pending"]),
-    }
-
-
-# --- Pipeline Traces ---
-@app.get("/api/v1/traces", tags=["Monitoring"])
-async def get_traces(limit: int = 50):
-    """Get recent pipeline traces for the admin dashboard."""
-    from backend.services.tracing import trace_store
-    return {
-        "traces": trace_store.get_recent(limit),
-        "count": trace_store.count,
-    }
-
-
-@app.get("/api/v1/traces/stats", tags=["Monitoring"])
-async def get_trace_stats():
-    """Get aggregated pipeline metrics — success rates, durations, escalation rates."""
-    from backend.services.tracing import trace_store
-    from backend.services.rag_service import get_knowledge_stats
-    from backend.services.resilience import get_resilience_status
-    return {
-        "pipeline": trace_store.get_stats(),
-        "knowledge": get_knowledge_stats(),
-        "resilience": get_resilience_status(),
-        "connections": {
-            "websocket_count": len(ws_manager.active_connections),
-            "active_sessions": len([s for s in SESSIONS.values() if s["status"] != "resolved"]),
-            "pending_handoffs": len([s for s in SESSIONS.values() if s["status"] == "handoff_pending"]),
-        },
-    }
 
 
 # --- Admin/Agent events WebSocket ---
@@ -357,12 +221,9 @@ async def websocket_events(websocket: WebSocket):
 @app.websocket("/ws/chat/{session_id}")
 async def chat_websocket(websocket: WebSocket, session_id: str, token: str = None):
     """Per-session WebSocket for user/agent chat.
-    
+
     Requires JWT auth via query parameter:
       ws://localhost:8000/ws/chat/{session_id}?token={jwt}
-    
-    The token is verified before the connection is accepted.
-    Falls back to unauthenticated if no token is provided (dev mode only).
     """
     if token:
         try:
@@ -374,7 +235,7 @@ async def chat_websocket(websocket: WebSocket, session_id: str, token: str = Non
             return
     else:
         logger.warning(f"⚠️ WebSocket connection without token for session {session_id} (dev mode)")
-    
+
     await handle_chat_websocket(websocket, session_id, SESSIONS, ws_manager)
 
 

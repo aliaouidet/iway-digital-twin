@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
+import { retry, timer, Subject, takeUntil, Subscription, EMPTY } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
 import { ThemeService } from '../../core/services/theme.service';
@@ -333,6 +335,9 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   sessionId = '';
   private socket$: WebSocketSubject<any> | null = null;
   private streamingContent = '';
+  private destroy$ = new Subject<void>();
+  private pingSubscription: Subscription | null = null;
+  private pendingMessage: string | null = null;  // Message waiting for WS to connect
 
   quickQuestions = [
     'Plafond soins dentaires ?',
@@ -420,6 +425,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   switchChat(chat: ChatThread): void {
+    console.log(`[UserChat] switchChat called: chat.id=${chat.id}, current sessionId=${this.sessionId}`);
     if (chat.id === this.sessionId) return;
 
     // Disconnect current
@@ -452,24 +458,95 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   // ─── WebSocket ───
 
   private connectWebSocket(): void {
-    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${this.sessionId}`;
-    this.socket$ = webSocket({ url: wsUrl, deserializer: (e) => JSON.parse(e.data) });
+    // Clean up existing connection
+    this.stopPing();
+    if (this.socket$ && !this.socket$.closed) {
+      this.socket$.complete();
+    }
 
-    this.socket$.subscribe({
-      next: (msg) => this.handleWsMessage(msg),
-      error: (err) => { console.error('WS error:', err); this.isConnected.set(false); },
-      complete: () => this.isConnected.set(false),
+    const token = this.authService.getToken() || '';
+    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${this.sessionId}?token=${token}`;
+
+    this.socket$ = webSocket({
+      url: wsUrl,
+      deserializer: (e) => JSON.parse(e.data),
+      openObserver: {
+        next: () => {
+          console.log('[UserChat WS] Connection opened, sending user_connect');
+          // Send user_connect AFTER the WS is confirmed open
+          this.socket$!.next({ type: 'user_connect' });
+          // Start heartbeat
+          this.startPing();
+          // Flush any pending message that was waiting for connection
+          if (this.pendingMessage) {
+            const msg = this.pendingMessage;
+            this.pendingMessage = null;
+            setTimeout(() => {
+              this.socket$?.next({ type: 'user_message', content: msg });
+            }, 300);
+          }
+        }
+      },
+      closeObserver: {
+        next: () => {
+          console.log('[UserChat WS] Connection closed');
+          this.isConnected.set(false);
+          this.stopPing();
+        }
+      }
     });
 
-    this.socket$!.next({ type: 'user_connect' });
+    this.socket$.pipe(
+      retry({
+        count: 5,
+        delay: (error, retryCount) => {
+          const delayMs = Math.min(2000 * Math.pow(2, retryCount - 1), 30000);
+          console.log(`[UserChat WS] Reconnecting in ${delayMs}ms (attempt ${retryCount})...`);
+          return timer(delayMs);
+        },
+        resetOnSuccess: true,
+      }),
+      catchError(err => {
+        console.error('[UserChat WS] Fatal error:', err);
+        this.isConnected.set(false);
+        return EMPTY;
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (msg) => this.handleWsMessage(msg),
+      error: (err) => { console.error('[UserChat WS] Stream error:', err); this.isConnected.set(false); },
+      complete: () => this.isConnected.set(false),
+    });
+  }
+
+  /** Start periodic PING heartbeat to keep the connection alive */
+  private startPing(): void {
+    this.stopPing();
+    this.pingSubscription = timer(25000, 25000).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe(() => {
+      if (this.socket$ && !this.socket$.closed) {
+        this.socket$.next({ type: 'PING' });
+      }
+    });
+  }
+
+  /** Stop the heartbeat timer */
+  private stopPing(): void {
+    if (this.pingSubscription) {
+      this.pingSubscription.unsubscribe();
+      this.pingSubscription = null;
+    }
   }
 
   private handleWsMessage(msg: any): void {
     switch (msg.type) {
       case 'connected':
+        console.log('[UserChat WS] ← connected event received');
         this.isConnected.set(true);
         break;
       case 'history':
+        console.log(`[UserChat WS] ← history: ${msg.messages?.length ?? 0} messages`);
         if (msg.messages?.length) {
           this.messages.set(msg.messages.map((m: any) => ({
             role: m.role,
@@ -488,22 +565,43 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.isThinking.set(false);
         this.thinkingStatus.set('');
         this.streamingContent += msg.token;
-        const msgs = this.messages();
-        const last = msgs[msgs.length - 1];
-        if (last?.isStreaming) {
-          this.messages.set([...msgs.slice(0, -1), { ...last, content: this.streamingContent }]);
-        } else {
-          this.messages.set([...msgs, { role: 'assistant', content: this.streamingContent, isStreaming: true }]);
-        }
+        console.log(`[UserChat WS] ← ai_token (total chars: ${this.streamingContent.length})`);
+        // Update or create streaming message
+        this.messages.update(msgs => {
+          const lastIdx = msgs.length - 1;
+          const last = msgs[lastIdx];
+          if (last?.isStreaming) {
+            // Update existing streaming message
+            const copy = [...msgs];
+            copy[lastIdx] = { ...last, content: this.streamingContent };
+            return copy;
+          } else {
+            // Create new streaming message
+            return [...msgs, { role: 'assistant', content: this.streamingContent, isStreaming: true }];
+          }
+        });
         break;
       case 'ai_done':
+        console.log(`[UserChat WS] ← ai_done (streamingContent len: ${this.streamingContent.length}, lastMsg streaming: ${this.messages()[this.messages().length-1]?.isStreaming})`);
         this.isThinking.set(false);
+        this.thinkingStatus.set('');
         const updated = this.messages();
         const lastMsg = updated[updated.length - 1];
         if (lastMsg?.isStreaming) {
+          // Happy path: finalize the streaming message
           this.messages.set([...updated.slice(0, -1), {
             ...lastMsg,
             isStreaming: false,
+            is_handoff_ai: msg.is_handoff_ai || false,
+            confidence: msg.confidence,
+          }]);
+        } else if (msg.text) {
+          // Fallback: tokens were lost (WS reconnect, timing issue)
+          // Use the full response text from ai_done payload
+          console.warn('[UserChat WS] ⚠ Tokens lost — using ai_done text fallback');
+          this.messages.update(msgs => [...msgs, {
+            role: 'assistant',
+            content: msg.text,
             is_handoff_ai: msg.is_handoff_ai || false,
             confidence: msg.confidence,
           }]);
@@ -543,6 +641,9 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.isSessionResolved.set(true);
         this.loadChatThreads();
         break;
+      case 'PONG':
+        // Heartbeat acknowledged — connection is alive
+        break;
     }
   }
 
@@ -554,17 +655,20 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     // Lazy session creation: if no session exists yet, create one first
     if (!this.sessionId) {
       this.messages.update(m => [...m, { role: 'user', content }]);
+      this.isThinking.set(true);
+      this.thinkingStatus.set('Création de la session...');
       this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
         next: (res) => {
           this.sessionId = res.session_id;
+          this.pendingMessage = content;  // Queue the message for after WS connects
           this.connectWebSocket();
           this.loadChatThreads();
-          // Wait for WS connection before sending
-          setTimeout(() => {
-            this.socket$?.next({ type: 'user_message', content });
-          }, 500);
         },
-        error: (err) => console.error('Failed to create session:', err)
+        error: (err) => {
+          console.error('Failed to create session:', err);
+          this.isThinking.set(false);
+          this.toastService.show('Erreur de connexion. Veuillez réessayer.', 'error');
+        }
       });
       return;
     }
@@ -628,6 +732,9 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.stopPing();
     this.socket$?.complete();
   }
 }
