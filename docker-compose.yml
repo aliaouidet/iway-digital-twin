@@ -6,6 +6,7 @@
 #   docker compose up -d          # Start all services
 #   docker compose logs -f api    # Follow API logs
 #   docker compose down -v        # Stop + remove volumes
+#   docker compose restart        # Restart all services
 #
 # Monitoring UIs:
 #   Flower       → http://localhost:5555  (Celery tasks)
