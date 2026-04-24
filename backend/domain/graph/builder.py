@@ -87,7 +87,7 @@ def build_claims_graph(checkpointer=None):
     # Stall -> Respond
     graph.add_edge("stall", "respond")
 
-    # Intake -> Route by intent (4-way branch)
+    # Intake -> Route by intent (5-way branch)
     graph.add_conditional_edges(
         "intake",
         route_by_intent,
@@ -96,6 +96,7 @@ def build_claims_graph(checkpointer=None):
             "claim_extraction": "claim_extraction",
             "escalation": "escalation",
             "action_router": "action_router",
+            "draft_response": "draft_response",
         },
     )
 

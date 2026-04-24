@@ -206,17 +206,22 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
     #   3. Data signal: DB records or field status     — weight 0.30
     rag_confidence = state.get("rag_confidence", 0.0) or 0.0
 
-    confidence = _fuse_confidence(
-        llm_score=llm_confidence,
-        rag_similarity=rag_confidence,
-        has_db_data=bool(system_records),
-        claim_details=claim_details,
-    )
+    intent = state.get("intent")
+    if intent == "small_talk":
+        confidence = 1.0
+        logger.info("Small talk intent detected -> bypassing fusion, setting confidence to 1.0")
+    else:
+        confidence = _fuse_confidence(
+            llm_score=llm_confidence,
+            rag_similarity=rag_confidence,
+            has_db_data=bool(system_records),
+            claim_details=claim_details,
+        )
 
-    logger.info(
-        f"Confidence fusion: RAG={rag_confidence:.2f}, LLM={llm_confidence:.2f} "
-        f"-> fused={confidence:.2f}"
-    )
+        logger.info(
+            f"Confidence fusion: RAG={rag_confidence:.2f}, LLM={llm_confidence:.2f} "
+            f"-> fused={confidence:.2f}"
+        )
 
     # Track which tools/paths were used
     tools_used = []

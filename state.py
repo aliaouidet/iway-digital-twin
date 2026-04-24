@@ -30,6 +30,7 @@ class ClaimIntent(str, Enum):
     CLAIM_ACTION = "claim_action"       # "Submit my reimbursement"
     ESCALATION = "escalation"           # "I want a human" / anger detected
     PERSONAL_LOOKUP = "personal_lookup" # "Show me my dossiers"
+    SMALL_TALK = "small_talk"           # Greetings, thanks, small talk
 
 
 class HumanDecision(str, Enum):

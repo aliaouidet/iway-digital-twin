@@ -31,6 +31,7 @@ services:
       - "5432:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U iway -d iway_db" ]
+      test: [ "CMD-SHELL", "pg_isready -U iway -d iway_db" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -234,8 +235,9 @@ services:
 volumes:
   pgdata:
   redisdata:
-  hf_cache:
   frontend_node_modules:
   flower_data:
   pgadmin_data:
-  redisinsight_data: # ollama_models:
+  redisinsight_data:
+  hf_cache:
+  # ollama_models:

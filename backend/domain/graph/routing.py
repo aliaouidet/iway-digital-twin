@@ -36,7 +36,7 @@ def pre_intake_router(
 
 def route_by_intent(
     state: ClaimsGraphState,
-) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router"]:
+) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "draft_response"]:
     """
     Conditional edge after intake_node (4-way branch).
 
@@ -51,6 +51,8 @@ def route_by_intent(
         return "claim_extraction"
     elif intent == ClaimIntent.PERSONAL_LOOKUP:
         return "action_router"
+    elif intent == ClaimIntent.SMALL_TALK:
+        return "draft_response"
     else:
         # INFO_QUERY goes through RAG
         return "rag_retrieval"
