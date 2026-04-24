@@ -1,4 +1,5 @@
 import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef } from '@angular/core';
+import { trigger, transition, style, animate } from '@angular/animations';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -13,19 +14,7 @@ import { ToastService } from '../../core/services/toast.service';
 import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
 import { ConfidenceGaugeComponent } from '../../shared/components/confidence-gauge.component';
 
-interface QueueItem {
-  id: string;
-  user_name: string;
-  user_role: string;
-  user_matricule: string;
-  status: string;
-  created_at: string;
-  reason: string | null;
-  message_count: number;
-  last_message: string;
-  agent_matricule: string | null;
-  last_ai_confidence: number | null;
-}
+import { QueueItem } from '../../shared/models/chat.interface';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'agent' | 'system';
@@ -53,12 +42,26 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
   selector: 'app-agent-workspace',
   standalone: true,
   imports: [CommonModule, FormsModule, IwayLogoComponent, ConfidenceGaugeComponent],
+  animations: [
+    trigger('listAnimation', [
+      transition(':enter', [
+        style({ opacity: 0, transform: 'translateY(-10px)' }),
+        animate('300ms ease-out', style({ opacity: 1, transform: 'translateY(0)' }))
+      ])
+    ])
+  ],
   template: `
-    <div class="h-screen flex transition-colors duration-300"
+    <div class="h-screen flex transition-colors duration-300 relative overflow-hidden"
       [class]="isDark() ? 'bg-[#020617]' : 'bg-slate-50'">
 
+      <!-- Mobile Backdrop -->
+      <div *ngIf="isSidebarOpen()" (click)="toggleSidebar()"
+           class="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity duration-300"></div>
+
       <!-- Left Panel: Escalation Queue -->
-      <aside class="w-80 flex flex-col border-r flex-shrink-0 transition-colors"
+      <aside class="w-80 flex flex-col border-r flex-shrink-0 transition-transform duration-300 ease-in-out absolute md:relative z-50 h-full shadow-2xl md:shadow-none"
+        [class.translate-x-0]="isSidebarOpen()"
+        [class.-translate-x-full]="!isSidebarOpen() && !isDesktopMode"
         [class]="isDark() ? 'bg-[#0F172A] border-slate-800' : 'bg-white border-slate-200'">
         <!-- Header -->
         <div class="h-14 flex items-center justify-between px-4 border-b flex-shrink-0"
@@ -69,6 +72,10 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             </div>
           </div>
           <div class="flex items-center gap-1">
+            <button (click)="toggleSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer mr-1"
+              [class]="isDark() ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-500'">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
             <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
               [class]="isDark() ? 'hover:bg-slate-800 text-slate-500' : 'hover:bg-slate-100 text-slate-400'">
               <svg *ngIf="isDark()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
@@ -130,7 +137,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             </div>
           </div>
 
-          <button *ngFor="let item of filteredQueue()" (click)="selectSession(item)"
+          <button *ngFor="let item of filteredQueue()" (click)="selectSession(item)" @listAnimation
             class="w-full text-left p-3 rounded-xl border transition-all cursor-pointer"
             [class]="getQueueItemClass(item)">
             <div class="flex items-center justify-between mb-1">
@@ -160,7 +167,15 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
       </aside>
 
       <!-- Right Panel -->
-      <main class="flex-1 flex flex-col">
+      <main class="flex-1 flex flex-col min-w-0 relative h-full">
+        <!-- Mobile Header (when no active session) -->
+        <header *ngIf="!activeSession()" class="md:hidden h-14 flex items-center px-4 border-b flex-shrink-0" [class]="isDark() ? 'bg-[#0F172A]/80 border-slate-800' : 'bg-white border-slate-200'">
+          <button (click)="toggleSidebar()" class="p-2 -ml-2 rounded-lg transition-colors cursor-pointer" [class]="isDark() ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'" aria-label="Ouvrir la file d'attente">
+            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <span class="ml-2 text-sm font-semibold" [class]="isDark() ? 'text-slate-200' : 'text-slate-800'">File d'attente</span>
+        </header>
+
         <!-- Empty State -->
         <div *ngIf="!activeSession()" class="flex-1 flex items-center justify-center">
           <div class="text-center">
@@ -177,10 +192,13 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
         <!-- Active Session -->
         <ng-container *ngIf="activeSession()">
           <!-- Session Header -->
-          <header class="h-14 flex items-center justify-between px-5 border-b flex-shrink-0"
+          <header class="h-14 flex items-center justify-between px-3 md:px-5 border-b flex-shrink-0"
             [class]="isDark() ? 'bg-[#0F172A]/60 border-slate-800' : 'bg-white border-slate-200'">
-            <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white"
+            <div class="flex items-center gap-2 md:gap-3 min-w-0">
+              <button (click)="toggleSidebar()" class="md:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0" [class]="isDark() ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'" aria-label="Ouvrir la file d'attente">
+                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+              </button>
+              <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                 style="background: linear-gradient(135deg, #f59e0b, #ef4444);">
                 {{getInitials(activeSession()!.user_name)}}
               </div>
@@ -448,7 +466,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   @ViewChild('chatContainer') private chatContainer!: ElementRef;
 
-  queue = signal<QueueItem[]>([]);
+  queue = this.wsService.sidebarQueue;
   queueLoading = signal(true);
   activeSession = signal<QueueItem | null>(null);
   chatHistory = signal<ChatMessage[]>([]);
@@ -456,6 +474,11 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   isTakingOver = signal(false);
   agentMessage = '';
   searchQuery = '';
+  isSidebarOpen = signal(false);
+  
+  get isDesktopMode(): boolean {
+    return window.innerWidth >= 768; // md breakpoint
+  }
 
   // Filters
   currentFilter = signal<QueueFilter>('all');
@@ -494,6 +517,16 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   isDark = () => this.themeService.isDark();
   toggleTheme = () => this.themeService.toggleTheme();
 
+  toggleSidebar() {
+    this.isSidebarOpen.update(v => !v);
+  }
+
+  closeSidebarOnMobile() {
+    if (!this.isDesktopMode) {
+      this.isSidebarOpen.set(false);
+    }
+  }
+
   getInitials(name: string): string {
     return name.split(' ').map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
   }
@@ -508,12 +541,11 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.eventSub = this.wsService.getMessages().subscribe(msg => {
       if (msg.type === 'NEW_ESCALATION') {
         this.toastService.show('Nouvelle escalation reçue', 'warning');
-        this.loadQueue();
       } else if (msg.type === 'SESSION_RESOLVED') {
         this.toastService.show('Session résolue avec succès', 'success');
-        this.loadQueue();
       } else if (msg.type === 'AGENT_JOINED') {
-        this.loadQueue();
+        // Optionnel: on peut forcer le rechargement si nécessaire, mais le websocket le gère si sidebar_update est émis.
+        // this.loadQueue(); 
       }
     });
   }
@@ -523,7 +555,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   private loadQueue(): void {
     this.queueLoading.set(true);
     this.http.get<QueueItem[]>(`${environment.apiUrl}/api/v1/sessions/active`).subscribe({
-      next: (items) => { this.queue.set(items); this.queueLoading.set(false); },
+      next: (items) => { this.wsService.setInitialQueue(items); this.queueLoading.set(false); },
       error: (err) => { console.error('Failed to load queue:', err); this.queueLoading.set(false); }
     });
   }
@@ -583,6 +615,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.loadHistory(item.id);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
+    this.closeSidebarOnMobile();
 
     // Auto-load briefing for pending sessions
     if (item.status === 'handoff_pending') {

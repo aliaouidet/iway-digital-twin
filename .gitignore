@@ -57,7 +57,7 @@ logs/
 *.pdf
 
 
-
+skills-lock.json
 # Celery
 celerybeat-schedule
 celerybeat-schedule.*

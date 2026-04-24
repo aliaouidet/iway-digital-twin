@@ -58,6 +58,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: iway-api
+    user: root
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
       REDIS_URL: redis://redis:6379/0
@@ -75,6 +77,7 @@ services:
       - "8000:8000"
     volumes:
       - .:/app  # Hot reload in development
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
@@ -88,6 +91,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: iway-worker
+    user: root
     command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2
     environment:
       DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
@@ -102,6 +106,7 @@ services:
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
     volumes:
       - .:/app
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
@@ -115,12 +120,14 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: iway-beat
+    user: root
     command: celery -A backend.workers.celery_app beat --loglevel=info
     environment:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
     volumes:
       - .:/app
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       redis:
         condition: service_healthy
@@ -138,6 +145,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: iway-flower
+    user: root
     command: celery -A backend.workers.celery_app flower --port=5555 --broker_api=redis://redis:6379/1 --persistent=True --db=/data/flower.db
     environment:
       CELERY_BROKER_URL: redis://redis:6379/1
@@ -147,6 +155,7 @@ services:
     volumes:
       - .:/app
       - flower_data:/data
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       redis:
         condition: service_healthy
@@ -195,7 +204,7 @@ services:
     image: node:20-alpine
     container_name: iway-frontend
     working_dir: /app
-    command: sh -c "npm install && npx ng serve --host 0.0.0.0 --port 4200 --disable-host-check"
+    command: sh -c "npm install && npx ng serve --host 0.0.0.0 --port 4200 --disable-host-check --poll 2000"
     volumes:
       - "./iway ui:/app"
       - frontend_node_modules:/app/node_modules
@@ -226,8 +235,10 @@ services:
 volumes:
   pgdata:
   redisdata:
+  hf_cache:
   frontend_node_modules:
   flower_data:
   pgadmin_data:
   redisinsight_data:
+  hf_cache:
   # ollama_models:
