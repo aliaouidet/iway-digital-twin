@@ -7,8 +7,9 @@ The real implementation has been decomposed into:
     ├── builder.py         # build_claims_graph()
     ├── persistence.py     # get_postgres_checkpointer()
     ├── llm_factory.py     # Shared LLM instance
-    ├── routing.py         # 4 routing functions
+    ├── routing.py         # 5 routing functions
     └── nodes/             # One file per pipeline node
+                           # (includes decompose, fan_out, merge)
 
 All existing imports continue to work:
     from graph import build_claims_graph
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     )
 
     async def test_pipeline():
-        """Run test queries through all 6 pipeline paths."""
+        """Run test queries through all 7 pipeline paths (including multi-intent)."""
         from langchain_core.messages import HumanMessage
 
         print("\n" + "=" * 60)
@@ -156,7 +157,30 @@ if __name__ == "__main__":
         print(f"  Sys Records:  {list(r6.get('system_records', {}).keys())}")
         print(f"  Response:     {r6['messages'][-1].content[:250]}...")
 
+        # -- Test 7: MULTI-INTENT -> Decompose -> Fan-Out -> Merge --
+        print(f"\n{'-' * 60}")
+        print("[TEST 7] Multi-intent: dossiers + support number")
+        print("-" * 60)
+
+        r7 = await graph.ainvoke(
+            {
+                "messages": [HumanMessage(
+                    content="Liste mes dossiers medicaux, identifie ceux qui sont en cours, et donne-moi le numero de support."
+                )],
+                "matricule": "12345",
+                "token": "test-token",
+                "claim_status": "active",
+            },
+            {"configurable": {"thread_id": "test-7"}},
+        )
+        print(f"  Intent:       {r7.get('intent')}")
+        print(f"  Sub-intents:  {r7.get('sub_intents')}")
+        print(f"  Confidence:   {r7.get('confidence')}")
+        print(f"  Tools:        {r7.get('tools_called')}")
+        print(f"  Sys Records:  {list(r7.get('system_records', {}).keys())}")
+        print(f"  Response:     {r7['messages'][-1].content[:300]}...")
+
         print(f"\n{'=' * 60}")
-        print("All 6 tests complete.")
+        print("All 7 tests complete.")
 
     asyncio.run(test_pipeline())

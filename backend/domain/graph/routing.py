@@ -38,7 +38,7 @@ def route_by_intent(
     state: ClaimsGraphState,
 ) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "draft_response"]:
     """
-    Conditional edge after intake_node (4-way branch).
+    Conditional edge after intake_node (5-way branch).
 
     Routes the claim to the appropriate processing path based on
     the classified intent.
@@ -56,6 +56,29 @@ def route_by_intent(
     else:
         # INFO_QUERY goes through RAG
         return "rag_retrieval"
+
+
+def route_after_decompose(
+    state: ClaimsGraphState,
+) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "draft_response", "multi_executor"]:
+    """
+    Conditional edge after decompose_node (opt-in multi-intent).
+
+    Decision logic:
+      - If 1 sub-intent  → fast path (same as route_by_intent, zero overhead)
+      - If >1 sub-intents → multi_executor for concurrent tool execution
+
+    This is the primary routing function used by the graph builder.
+    route_by_intent is kept for backward compatibility.
+    """
+    sub_intents = state.get("sub_intents", [])
+
+    if len(sub_intents) > 1:
+        logger.info(f"Multi-intent detected ({len(sub_intents)} sub-intents) -> multi_executor")
+        return "multi_executor"
+
+    # Single intent — use the fast path (no overhead)
+    return route_by_intent(state)
 
 
 def route_action(

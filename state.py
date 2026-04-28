@@ -105,6 +105,18 @@ def replace_list(existing: list[RetrievedDoc], update: list[RetrievedDoc]) -> li
     return update
 
 
+def merge_sub_results(existing: dict, update: dict) -> dict:
+    """Accumulate results from parallel sub-intent execution.
+
+    Each fan-out branch writes its result under a unique intent key.
+    This reducer merges them into a single dict so draft_response_node
+    can synthesize all sub-intent outputs.
+    """
+    merged = dict(existing or {})
+    merged.update(update or {})
+    return merged
+
+
 # ── The Graph State ───────────────────────────────────────────
 
 class ClaimsGraphState(TypedDict):
@@ -127,6 +139,12 @@ class ClaimsGraphState(TypedDict):
 
     # ── Intent Classification ─────────────────────────────────
     intent: Optional[ClaimIntent]
+
+    # ── Multi-Intent Decomposition ────────────────────────────
+    #   Populated by decompose_node. Each entry:
+    #   {"intent": "personal_lookup", "query": "Liste mes dossiers"}
+    sub_intents: list[dict]
+    sub_intent_results: Annotated[dict, merge_sub_results]
 
     # ── RAG Retrieval ─────────────────────────────────────────
     retrieved_docs: Annotated[list[RetrievedDoc], replace_list]

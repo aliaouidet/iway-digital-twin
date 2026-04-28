@@ -26,6 +26,9 @@ REGLES:
 4. Sois professionnel, empathique et concis (3-5 phrases maximum).
 5. Cite les articles ou regles pertinents quand c'est possible.
 6. Si des donnees systeme (dossiers, beneficiaires) sont fournies, presente-les de maniere claire et structuree.
+7. Si des sous-requetes sont listees, reponds a CHACUNE d'entre elles dans ta reponse.
+
+{sub_intents_section}
 
 {context_section}
 
@@ -176,8 +179,18 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
             system_records, indent=2, ensure_ascii=False, default=str
         )
 
+    # -- Build the sub-intents section (multi-intent awareness) --
+    sub_intents_section = ""
+    sub_intents = state.get("sub_intents") or []
+    if len(sub_intents) > 1:
+        items = [f"- {s['query']}" for s in sub_intents]
+        sub_intents_section = (
+            "SOUS-REQUETES A ADRESSER (reponds a CHACUNE):\n" + "\n".join(items)
+        )
+
     # -- Compose the full prompt --
     system_prompt = DRAFT_SYSTEM_PROMPT.format(
+        sub_intents_section=sub_intents_section,
         context_section=context_section,
         claim_section=claim_section,
         records_section=records_section,
