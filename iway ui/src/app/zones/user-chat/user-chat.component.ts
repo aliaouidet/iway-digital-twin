@@ -252,14 +252,12 @@ interface ChatThread {
             <!-- System Message -->
             <div *ngIf="msg.role === 'system'" class="flex justify-center">
               <div class="px-4 py-2 rounded-full text-xs font-medium"
-                [class]="isDark() ? 'bg-slate-800/50 text-slate-500' : 'bg-slate-100 text-slate-500'">
-                {{msg.content}}
+                [class]="isDark() ? 'bg-slate-800/50 text-slate-500' : 'bg-slate-100 text-slate-500'" [innerHTML]="formatMessage(msg.content)">
               </div>
             </div>
             <!-- User Message -->
             <div *ngIf="msg.role === 'user'" class="flex justify-end">
-              <div class="max-w-[75%] px-4 py-3 rounded-2xl rounded-br-md text-sm bg-indigo-600 text-white">
-                {{msg.content}}
+              <div class="max-w-[75%] px-4 py-3 rounded-2xl rounded-br-md text-sm bg-indigo-600 text-white" [innerHTML]="formatMessage(msg.content)">
               </div>
             </div>
             <!-- AI / Agent Message -->
@@ -286,7 +284,7 @@ interface ChatThread {
                   [class]="msg.is_handoff_ai
                     ? (isDark() ? 'bg-orange-500/5 border border-orange-500/20 text-orange-200' : 'bg-orange-50 border border-orange-200 text-orange-900')
                     : (isDark() ? 'bg-[#0F172A] border border-slate-800 text-slate-300' : 'bg-white border border-slate-200 text-slate-700 shadow-sm')">
-                  {{msg.content}}<span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 ml-0.5 rounded-sm animate-pulse" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'"></span>
+                  <span [innerHTML]="formatMessage(msg.content)"></span><span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 ml-0.5 rounded-sm animate-pulse" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'"></span>
                 </div>
               </div>
             </div>
@@ -428,6 +426,19 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   isDark = () => this.themeService.isDark();
   toggleTheme = () => this.themeService.toggleTheme();
+
+  formatMessage(text: string): string {
+    if (!text) return '';
+    // Format bold: **text**
+    let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Format italic: *text* (only if not already bold)
+    formatted = formatted.replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    // Format lists: * item
+    formatted = formatted.replace(/^\s*\*\s+(.*)$/gm, '• $1');
+    // Format newlines
+    formatted = formatted.replace(/\n/g, '<br>');
+    return formatted;
+  }
 
   ngOnInit(): void {
     this.checkScreenSize();
