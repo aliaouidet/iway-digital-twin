@@ -70,7 +70,9 @@ services:
       IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
       IWAY_API_KEY: ${IWAY_API_KEY:-}
       OLLAMA_BASE_URL: http://ollama:11434/v1
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-caramel-medley-407500}
+      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
+      GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
     ports:
@@ -78,6 +80,7 @@ services:
     volumes:
       - .:/app # Hot reload in development
       - hf_cache:/root/.cache/huggingface
+      - ${APPDATA}/gcloud:/root/.config/gcloud:ro
     depends_on:
       db:
         condition: service_healthy
@@ -102,11 +105,14 @@ services:
       IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
       IWAY_API_KEY: ${IWAY_API_KEY:-}
       OLLAMA_BASE_URL: http://ollama:11434/v1
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-caramel-medley-407500}
+      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
+      GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
     volumes:
       - .:/app
       - hf_cache:/root/.cache/huggingface
+      - ${APPDATA}/gcloud:/root/.config/gcloud:ro
     depends_on:
       db:
         condition: service_healthy
@@ -238,5 +244,4 @@ volumes:
   flower_data:
   pgadmin_data:
   redisinsight_data:
-  hf_cache:
-  # ollama_models:
+  hf_cache: # ollama_models:

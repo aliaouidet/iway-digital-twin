@@ -14,7 +14,8 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     USE_LOCAL_LLM: bool = False
-    GOOGLE_API_KEY: str = ""
+    GCP_PROJECT_ID: str = ""
+    GCP_LOCATION: str = "us-central1"
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_MODEL: str = "qwen3.5:9b"
     LLM_TIMEOUT_SECONDS: int = 30
