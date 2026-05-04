@@ -35,6 +35,9 @@ Analyse le dernier message de l'utilisateur et classifie-le dans EXACTEMENT UNE 
 4. "personal_lookup" — L'utilisateur veut consulter ses propres donnees personnelles (dossiers, beneficiaires, historique).
    Exemples: "Quels sont mes dossiers ?", "Qui est sur mon contrat ?", "Mon historique de soins"
 
+5. "small_talk" — Salutations, remerciements, ou politesses basiques sans requete specifique.
+   Exemples: "Bonjour", "Salut", "Merci beaucoup", "Au revoir"
+
 Reponds UNIQUEMENT avec le nom de la categorie, sans guillemets ni explication.
 Par exemple: info_query"""
 
@@ -63,6 +66,7 @@ async def intake_node(state: ClaimsGraphState) -> dict:
         "claim_action": ClaimIntent.CLAIM_ACTION,
         "escalation": ClaimIntent.ESCALATION,
         "personal_lookup": ClaimIntent.PERSONAL_LOOKUP,
+        "small_talk": ClaimIntent.SMALL_TALK,
     }
     intent = intent_map.get(raw_intent, ClaimIntent.INFO_QUERY)
 

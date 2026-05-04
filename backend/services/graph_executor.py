@@ -79,10 +79,12 @@ _STREAMABLE_NODES = {"draft_response", "stall"}
 
 # Node activity labels shown to the user as "thinking" indicators.
 _NODE_LABELS = {
+    "decompose": "Décomposition de votre demande...",
     "intake": "Classification de votre demande...",
     "rag_retrieval": "Recherche dans la base de connaissances...",
     "claim_extraction": "Analyse des détails de votre réclamation...",
     "action_router": "Identification du service approprié...",
+    "multi_executor": "Traitement de vos demandes...",
     "dossier_lookup": "Consultation de vos dossiers...",
     "beneficiary_lookup": "Vérification de vos bénéficiaires...",
     "draft_response": "Rédaction de la réponse...",

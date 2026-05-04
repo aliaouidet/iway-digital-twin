@@ -6,6 +6,7 @@
 #   docker compose up -d          # Start all services
 #   docker compose logs -f api    # Follow API logs
 #   docker compose down -v        # Stop + remove volumes
+#   docker compose restart        # Restart all services
 #
 # Monitoring UIs:
 #   Flower       → http://localhost:5555  (Celery tasks)
@@ -29,7 +30,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U iway -d iway_db"]
+      test: [ "CMD-SHELL", "pg_isready -U iway -d iway_db" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -45,7 +46,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -75,7 +76,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/app  # Hot reload in development
+      - .:/app # Hot reload in development
       - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
@@ -212,7 +213,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
-
   # --- Ollama (Local LLM Serving) ---
   # Uncomment and configure GPU passthrough for local LLM support
   # ollama:
@@ -234,9 +234,9 @@ services:
 volumes:
   pgdata:
   redisdata:
-  hf_cache:
   frontend_node_modules:
   flower_data:
   pgadmin_data:
   redisinsight_data:
+  hf_cache:
   # ollama_models:
