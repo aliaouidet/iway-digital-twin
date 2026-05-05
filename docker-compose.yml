@@ -81,7 +81,7 @@ services:
     volumes:
       - .:/app # Hot reload in development
       - hf_cache:/root/.cache/huggingface
-      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ${APPDATA:-~/.config}/gcloud:/root/.config/gcloud:ro
     depends_on:
       db:
         condition: service_healthy
@@ -114,7 +114,7 @@ services:
     volumes:
       - .:/app
       - hf_cache:/root/.cache/huggingface
-      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ${APPDATA:-~/.config}/gcloud:/root/.config/gcloud:ro
     depends_on:
       db:
         condition: service_healthy
