@@ -39,7 +39,7 @@ Thumbs.db
 .streamlit/secrets.toml
 
 # Agent
-.agent/
+.agents/
 
 # Logs
 logs/

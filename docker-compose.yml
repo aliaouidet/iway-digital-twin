@@ -75,12 +75,13 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+      DB_HOST: db
     ports:
       - "8000:8000"
     volumes:
       - .:/app # Hot reload in development
       - hf_cache:/root/.cache/huggingface
-      - ${APPDATA}/gcloud:/root/.config/gcloud:ro
+      - ~/.config/gcloud:/root/.config/gcloud:ro
     depends_on:
       db:
         condition: service_healthy
@@ -109,10 +110,11 @@ services:
       GCP_LOCATION: ${GCP_LOCATION:-us-central1}
       GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
       USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
+      DB_HOST: db
     volumes:
       - .:/app
       - hf_cache:/root/.cache/huggingface
-      - ${APPDATA}/gcloud:/root/.config/gcloud:ro
+      - ~/.config/gcloud:/root/.config/gcloud:ro
     depends_on:
       db:
         condition: service_healthy
