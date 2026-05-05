@@ -16,6 +16,7 @@ from langchain_core.messages import SystemMessage
 
 from state import ClaimsGraphState, ClaimIntent
 from backend.domain.graph.llm_factory import llm
+from backend.domain.graph.semantic_router import classify_intent
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -76,6 +77,35 @@ async def decompose_node(state: ClaimsGraphState) -> dict:
         intent: ClaimIntent enum of the primary (first) sub-intent
     """
     last_message = state["messages"][-1]
+    user_text = last_message.content
+
+    # ── FAST PATH: Semantic Router (sub-100ms, no LLM call) ──
+    # For short, single-intent messages, the semantic router can
+    # classify intent without an LLM call. Only falls back to the
+    # LLM decomposer when uncertain or message may be multi-intent.
+    word_count = len(user_text.split())
+    router_intent, router_confidence = classify_intent(user_text)
+
+    if router_intent is not None and router_confidence >= 0.80 and word_count <= 20:
+        # High-confidence single-intent — skip LLM entirely
+        primary_intent = _INTENT_MAP.get(router_intent, ClaimIntent.INFO_QUERY)
+        sub_intents = [{"intent": router_intent, "query": user_text}]
+
+        logger.info(
+            f"🧭 Semantic router classified: {router_intent} "
+            f"(confidence={router_confidence:.3f}, skipped LLM decomposer)"
+        )
+
+        return {
+            "sub_intents": sub_intents,
+            "intent": primary_intent,
+        }
+
+    # ── SLOW PATH: LLM Decomposer (multi-intent, low router confidence) ──
+    logger.info(
+        f"🧠 LLM decomposer activated (router={router_intent}/{router_confidence:.2f}, "
+        f"words={word_count})"
+    )
 
     response = await llm.ainvoke([
         SystemMessage(content=DECOMPOSE_SYSTEM_PROMPT),

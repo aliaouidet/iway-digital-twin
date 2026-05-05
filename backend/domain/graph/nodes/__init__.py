@@ -16,6 +16,7 @@ from backend.domain.graph.nodes.clarification import clarification_node
 from backend.domain.graph.nodes.handoff import handoff_node
 from backend.domain.graph.nodes.stall import stall_node
 from backend.domain.graph.nodes.escalation import escalation_node
+from backend.domain.graph.nodes.compliance_check import compliance_check_node
 
 __all__ = [
     "intake_node",
@@ -31,6 +32,7 @@ __all__ = [
     "handoff_node",
     "stall_node",
     "escalation_node",
+    "compliance_check_node",
     "respond_node",
 ]
 

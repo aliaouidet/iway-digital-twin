@@ -25,6 +25,7 @@ from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 
 from backend.config import get_settings
+from backend.services.input_sanitizer import sanitize_user_input
 from backend.services.resilience import (
     llm_circuit, embedding_circuit,
     with_timeout, TimeoutError,
@@ -210,6 +211,12 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                 content = msg.get("content", "").strip()
                 if not content:
                     continue
+
+                # --- Prompt Injection Defense ---
+                content, is_suspicious = sanitize_user_input(content)
+                if is_suspicious:
+                    logger.warning(f"🛡️ Suspicious input from session {session_id}: {content[:80]}...")
+
                 user_msg = {"role": "user", "content": content, "timestamp": datetime.now().isoformat()}
                 async with lock:
                     session["history"].append(user_msg)

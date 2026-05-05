@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://iway:iway_secret@localhost:5432/iway_db"
 
     # --- Redis ---
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://:iway_redis_secret@localhost:6379/0"
 
     # --- LLM ---
     USE_LOCAL_LLM: bool = False
@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     SESSION_TTL_HOURS: int = 24
 
     # --- Celery ---
-    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    CELERY_BROKER_URL: str = "redis://:iway_redis_secret@localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://:iway_redis_secret@localhost:6379/2"
     SYNC_INTERVAL_MINUTES: int = 5
 
     class Config:

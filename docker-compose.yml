@@ -40,7 +40,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: iway-redis
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:-iway_redis_secret} --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redisdata:/data
     ports:
@@ -62,9 +62,9 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
       MOCK_SERVER_URL: http://localhost:8000
       IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
       IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
@@ -98,9 +98,9 @@ services:
     command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2
     environment:
       DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
       IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
       IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
       IWAY_API_KEY: ${IWAY_API_KEY:-}
@@ -129,8 +129,8 @@ services:
     user: root
     command: celery -A backend.workers.celery_app beat --loglevel=info
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
     volumes:
       - .:/app
       - hf_cache:/root/.cache/huggingface
@@ -152,10 +152,10 @@ services:
       dockerfile: Dockerfile
     container_name: iway-flower
     user: root
-    command: celery -A backend.workers.celery_app flower --port=5555 --broker_api=redis://redis:6379/1 --persistent=True --db=/data/flower.db
+    command: celery -A backend.workers.celery_app flower --port=5555 --broker_api=redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1 --persistent=True --db=/data/flower.db
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
     ports:
       - "5555:5555"
     volumes:

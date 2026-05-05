@@ -34,6 +34,7 @@ from backend.domain.graph.nodes import (
     stall_node,
     escalation_node,
     respond_node,
+    compliance_check_node,
 )
 
 from backend.domain.graph.nodes.multi_executor import multi_executor_node
@@ -79,6 +80,7 @@ def build_claims_graph(checkpointer=None):
     graph.add_node("beneficiary_lookup", beneficiary_lookup_node)
     graph.add_node("multi_executor", multi_executor_node)
     graph.add_node("draft_response", draft_response_node)
+    graph.add_node("compliance_check", compliance_check_node)
     graph.add_node("clarification", clarification_node)
     graph.add_node("handoff", handoff_node)
     graph.add_node("stall", stall_node)
@@ -137,9 +139,12 @@ def build_claims_graph(checkpointer=None):
     # Multi-executor runs all sub-intents concurrently, then → Draft response
     graph.add_edge("multi_executor", "draft_response")
 
-    # Draft → Route by confidence (3-way branch)
+    # Draft → Compliance Check (rule-based verification)
+    graph.add_edge("draft_response", "compliance_check")
+
+    # Compliance Check → Route by confidence (3-way branch)
     graph.add_conditional_edges(
-        "draft_response",
+        "compliance_check",
         route_by_confidence,
         {
             "respond": "respond",
