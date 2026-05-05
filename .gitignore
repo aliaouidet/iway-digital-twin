@@ -40,8 +40,6 @@ Thumbs.db
 
 # Agent
 .agent/
-.agents/
-.skills/
 
 # Logs
 logs/
