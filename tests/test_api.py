@@ -230,7 +230,7 @@ class TestSessions:
         assert r.status_code == 200
         data = r.json()
         assert "session_id" in data
-        assert data["session_id"].startswith("sess-")
+        assert len(data["session_id"]) == 36  # UUID format
 
     def test_list_sessions(self):
         httpx.post(f"{BASE}/api/v1/sessions/create", headers=self.headers)
@@ -290,7 +290,7 @@ class TestBriefing:
 
     def test_briefing_404_invalid_session(self):
         """Briefing returns 404 for nonexistent session."""
-        r = httpx.get(f"{BASE}/api/v1/sessions/sess-nonexistent/briefing", headers=self.agent_headers)
+        r = httpx.get(f"{BASE}/api/v1/sessions/00000000-0000-0000-0000-000000000000/briefing", headers=self.agent_headers)
         assert r.status_code == 404
 
 
@@ -340,7 +340,7 @@ class TestHybridHandoff:
 
     def test_takeover_nonexistent_session(self):
         """Takeover returns 404 for nonexistent session."""
-        r = httpx.post(f"{BASE}/api/v1/sessions/sess-fake/takeover", headers=self.agent_headers)
+        r = httpx.post(f"{BASE}/api/v1/sessions/00000000-0000-0000-0000-000000000000/takeover", headers=self.agent_headers)
         assert r.status_code == 404
 
     def test_user_chats_endpoint(self):

@@ -112,7 +112,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=[
+        "http://localhost:4200",      # Angular dev server
+        "http://127.0.0.1:4200",
+        "http://localhost:8000",       # Swagger UI (same-origin)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -137,12 +141,6 @@ async def root():
         "version": "2.0.0",
         "architecture": "modular",
         "status": "operational",
-        "personas_available": [
-            "12345 / pass   (Nadia – Adherent)",
-            "99999 / med    (Dr. Amine – Prestataire)",
-            "88888 / agent  (Karim – Agent)",
-            "77777 / admin  (Sara – Admin)",
-        ],
         "auth": "POST /auth/login with {matricule, password}",
         "docs": "/docs"
     }
@@ -188,8 +186,30 @@ async def readiness_probe():
 
 # --- Admin/Agent events WebSocket ---
 @app.websocket("/ws/events")
-async def websocket_events(websocket: WebSocket):
-    """WebSocket endpoint for real-time dashboard/agent updates."""
+async def websocket_events(websocket: WebSocket, token: str = None):
+    """WebSocket endpoint for real-time dashboard/agent updates.
+
+    Requires JWT auth via query parameter. Only Agent/Admin roles allowed.
+    """
+    # --- C5 Fix: Authenticate + authorize before accepting ---
+    if not token:
+        await websocket.close(code=4001)
+        logger.warning("⛔ Events WebSocket rejected: no token provided")
+        return
+    try:
+        from backend.routers.auth import verify_jwt, MOCK_USERS
+        payload = verify_jwt(token)
+        matricule = payload.get("sub")
+        user = MOCK_USERS.get(matricule, {})
+        if user.get("role") not in ("Agent", "Admin"):
+            await websocket.close(code=4003)
+            logger.warning(f"⛔ Events WebSocket rejected: role '{user.get('role')}' not authorized")
+            return
+    except Exception as e:
+        await websocket.close(code=4001)
+        logger.warning(f"⛔ Events WebSocket auth failed: {e}")
+        return
+
     await ws_manager.connect(websocket)
     try:
         while True:
@@ -233,16 +253,18 @@ async def chat_websocket(websocket: WebSocket, session_id: str, token: str = Non
     Requires JWT auth via query parameter:
       ws://localhost:8000/ws/chat/{session_id}?token={jwt}
     """
-    if token:
-        try:
-            from backend.routers.auth import verify_jwt
-            verify_jwt(token)
-        except Exception as e:
-            await websocket.close(code=4001)
-            logger.warning(f"⛔ WebSocket auth failed for session {session_id}: {e}")
-            return
-    else:
-        logger.warning(f"⚠️ WebSocket connection without token for session {session_id} (dev mode)")
+    # --- C4 Fix: Reject unauthenticated connections ---
+    if not token:
+        await websocket.close(code=4001)
+        logger.warning(f"⛔ Chat WebSocket rejected: no token for session {session_id}")
+        return
+    try:
+        from backend.routers.auth import verify_jwt
+        verify_jwt(token)
+    except Exception as e:
+        await websocket.close(code=4001)
+        logger.warning(f"⛔ Chat WebSocket auth failed for session {session_id}: {e}")
+        return
 
     await handle_chat_websocket(websocket, session_id, SESSIONS, ws_manager)
 

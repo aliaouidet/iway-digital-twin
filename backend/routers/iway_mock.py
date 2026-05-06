@@ -194,7 +194,7 @@ async def get_knowledge_base():
 async def get_me(matricule: str = Depends(get_current_user)):
     """Récupère les informations d'identité de l'utilisateur connecté."""
     user = MOCK_USERS[matricule]
-    return {k: v for k, v in user.items() if k != "password"}
+    return {k: v for k, v in user.items() if k != "password_hash"}
 
 
 @router.get("/adherent/dossiers", tags=["Métier"])

@@ -58,6 +58,32 @@ class ApproveInput(BaseModel):
     clarification: Optional[str] = None  # Additional text if action is "clarify"
 
 
+# --- Authorization Helper (C1 Fix) ---
+
+def _authorize_session(
+    session: dict,
+    matricule: str,
+    allow_roles: set = frozenset({"Agent", "Admin"}),
+):
+    """Check that the caller owns the session or has an authorized role.
+
+    Raises HTTPException 403 if neither condition is met.
+    This prevents IDOR attacks where any authenticated user could
+    access, modify, or resolve another user's session.
+    """
+    # Owner always has access to their own session
+    if session["user_matricule"] == matricule:
+        return
+    # Check role-based access
+    user = MOCK_USERS.get(matricule, {})
+    if user.get("role") in allow_roles:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Not authorized to access this session",
+    )
+
+
 # --- Endpoints ---
 
 @router.post("/create")
@@ -66,7 +92,7 @@ async def create_session(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ):
     """Create a new chat session for a user."""
-    session_id = f"sess-{uuid.uuid4().hex[:8]}"
+    session_id = str(uuid.uuid4())
     user = MOCK_USERS.get(matricule, {})
     SESSIONS[session_id] = {
         "id": session_id,
@@ -228,6 +254,7 @@ async def get_session_history(session_id: str, matricule: str = Depends(get_curr
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _authorize_session(session, matricule)
     return {
         "session_id": session_id,
         "status": session["status"],
@@ -250,6 +277,7 @@ async def get_session_briefing(session_id: str, matricule: str = Depends(get_cur
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _authorize_session(session, matricule)
 
     history = session["history"]
     user_messages = [m for m in history if m["role"] == "user"]
@@ -320,6 +348,7 @@ async def approve_ai_response(
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _authorize_session(session, matricule, allow_roles={"Agent", "Admin"})
 
     trigger = session.get("trigger_message")
     if not trigger:
@@ -382,11 +411,14 @@ async def approve_ai_response(
 
 @router.post("/{session_id}/takeover")
 async def takeover_session(session_id: str, matricule: str = Depends(get_current_user)):
-    """Agent takes over a session."""
+    """Agent takes over a session. Only Agent/Admin roles can take over."""
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    # Only agents/admins can take over — owners cannot take over their own session
     user = MOCK_USERS.get(matricule, {})
+    if user.get("role") not in ("Agent", "Admin"):
+        raise HTTPException(status_code=403, detail="Only Agent or Admin can take over sessions")
     session["status"] = "agent_connected"
     session["agent_matricule"] = matricule
     agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip()
@@ -427,6 +459,7 @@ async def resolve_session(
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _authorize_session(session, matricule, allow_roles={"Agent", "Admin"})
 
     session["status"] = "resolved"
     session["history"].append({

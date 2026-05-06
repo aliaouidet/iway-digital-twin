@@ -37,14 +37,6 @@ async def rag_retrieval_node(state: ClaimsGraphState) -> dict:
 
     logger.info(f"RAG retrieval for: {query[:60]}... (store={knowledge_store.count} entries)")
 
-    # Early exit if vector store is empty
-    if knowledge_store.count == 0:
-        logger.warning("Knowledge store is empty -- RAG will return no results")
-        return {
-            "retrieved_docs": [],
-            "rag_confidence": 0.0,
-        }
-
     # Step 1: Bi-encoder retrieval (top-10 candidates for reranking)
     raw_results = await async_retrieve_context(query, top_k=_RERANK_CANDIDATES)
 

@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import jwt  # PyJWT
+import bcrypt
 
 from backend.config import get_settings
 
@@ -43,22 +44,22 @@ MOCK_USERS = {
     "12345": {
         "matricule": "12345", "nom": "Mansour", "prenom": "Nadia",
         "role": "Adherent", "email": "nadia.mansour@email.com",
-        "password": "pass"
+        "password_hash": "$2b$12$fy/C8bpfRtYvcJQfpWnrR.9zf2TEjsSSjlOR0cVz7OE6rGjifC7yO"  # pass
     },
     "99999": {
         "matricule": "99999", "nom": "Zaid", "prenom": "Amine",
         "role": "Prestataire", "email": "amine.zaid@clinique.tn",
-        "specialite": "Cardiologie", "password": "med"
+        "specialite": "Cardiologie", "password_hash": "$2b$12$MTxw/2PzzC5YloiWOfduDuvgK79.E8q.tcLduY.pCxuR0CvvwMaQu"  # med
     },
     "88888": {
         "matricule": "88888", "nom": "Belhadj", "prenom": "Karim",
         "role": "Agent", "email": "karim.belhadj@iway.tn",
-        "password": "agent"
+        "password_hash": "$2b$12$dp29PQKJJ82TU0WmxL3aCOufQEuIpkVBANGbxlhsOdiSBmUI3yyhS"  # agent
     },
     "77777": {
         "matricule": "77777", "nom": "Toumi", "prenom": "Sara",
         "role": "Admin", "email": "sara.toumi@iway.tn",
-        "password": "admin"
+        "password_hash": "$2b$12$tvH8jRLIQsweJKLtOmFk0eqcTbniIQExBlTVo9NAd8BURZbNcCDOy"  # admin
     },
 }
 
@@ -138,7 +139,11 @@ def require_role(*allowed_roles: str):
 async def login(data: LoginInput):
     """Authenticate with matricule + password, receive an RS256-signed JWT."""
     user = MOCK_USERS.get(data.matricule)
-    if not user or user["password"] != data.password:
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid matricule or password")
+        
+    password_valid = bcrypt.checkpw(data.password.encode('utf-8'), user["password_hash"].encode('utf-8'))
+    if not password_valid:
         raise HTTPException(status_code=401, detail="Invalid matricule or password")
 
     token = create_jwt(data.matricule)

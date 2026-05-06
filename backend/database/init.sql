@@ -140,10 +140,10 @@ CREATE INDEX ix_audit_trace ON audit_log(trace_id);
 -- ============================================================
 
 INSERT INTO users (matricule, nom, prenom, role, email, specialite, password_hash) VALUES
-    ('12345', 'Mansour',  'Nadia',  'Adherent',     'nadia.mansour@email.com', NULL,           'pass'),
-    ('99999', 'Zaid',     'Amine',  'Prestataire',  'amine.zaid@clinique.tn',  'Cardiologie',  'med'),
-    ('88888', 'Belhadj',  'Karim',  'Agent',        'karim.belhadj@iway.tn',   NULL,           'agent'),
-    ('77777', 'Toumi',    'Sara',   'Admin',        'sara.toumi@iway.tn',      NULL,           'admin');
+    ('12345', 'Mansour',  'Nadia',  'Adherent',     'nadia.mansour@email.com', NULL,           '$2b$12$fy/C8bpfRtYvcJQfpWnrR.9zf2TEjsSSjlOR0cVz7OE6rGjifC7yO'),
+    ('99999', 'Zaid',     'Amine',  'Prestataire',  'amine.zaid@clinique.tn',  'Cardiologie',  '$2b$12$MTxw/2PzzC5YloiWOfduDuvgK79.E8q.tcLduY.pCxuR0CvvwMaQu'),
+    ('88888', 'Belhadj',  'Karim',  'Agent',        'karim.belhadj@iway.tn',   NULL,           '$2b$12$dp29PQKJJ82TU0WmxL3aCOufQEuIpkVBANGbxlhsOdiSBmUI3yyhS'),
+    ('77777', 'Toumi',    'Sara',   'Admin',        'sara.toumi@iway.tn',      NULL,           '$2b$12$tvH8jRLIQsweJKLtOmFk0eqcTbniIQExBlTVo9NAd8BURZbNcCDOy');
 
 -- ============================================================
 -- SEED DATA: System logs (initial dashboard data)
