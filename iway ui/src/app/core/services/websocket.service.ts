@@ -19,15 +19,17 @@ export class WebSocketService implements OnDestroy {
   private _sidebarQueue = signal<QueueItem[]>([]);
   public sidebarQueue = this._sidebarQueue.asReadonly();
 
-  connect(): void {
+  connect(token?: string): void {
     if (this.socket$ && !this.socket$.closed) {
       return;
     }
 
+    const wsUrl = token ? `${environment.wsUrl}?token=${token}` : environment.wsUrl;
+
     this.socket$ = webSocket<WsMessage>({
-      url: environment.wsUrl,
+      url: wsUrl,
       openObserver: {
-        next: () => console.log('[WebSocket] Connected to', environment.wsUrl)
+        next: () => console.log('[WebSocket] Connected to', wsUrl)
       },
       closeObserver: {
         next: () => console.log('[WebSocket] Connection closed')

@@ -9,9 +9,10 @@ independent sub-queries that can be executed in parallel.
 Backward compatible: always sets `intent` to the primary (first) sub-intent.
 """
 
-import json
 import logging
+from typing import List, Literal
 
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage
 
 from state import ClaimsGraphState, ClaimIntent
@@ -19,6 +20,23 @@ from backend.domain.graph.llm_factory import llm
 from backend.domain.graph.semantic_router import classify_intent
 
 logger = logging.getLogger("I-Way-Twin")
+
+
+class SubIntent(BaseModel):
+    """A single decomposed sub-intent."""
+    intent: Literal["info_query", "claim_action", "escalation", "personal_lookup", "small_talk"] = Field(
+        description="The classified intent category"
+    )
+    query: str = Field(
+        description="The standalone sub-query text"
+    )
+
+
+class SubIntentList(BaseModel):
+    """List of decomposed sub-intents."""
+    sub_intents: List[SubIntent] = Field(
+        description="Array of decomposed sub-intents (1 for single-intent, up to 4 for multi-intent)"
+    )
 
 
 DECOMPOSE_SYSTEM_PROMPT = """Tu es un decomposeur de requetes pour un systeme d'assurance medicale I-Way.
@@ -39,20 +57,11 @@ REGLES:
 - Ne cree PAS de sous-requetes redondantes.
 - Maximum 4 sous-requetes.
 
-Retourne UNIQUEMENT un JSON array valide, sans commentaires:
-[
-  {"intent": "personal_lookup", "query": "Liste mes dossiers medicaux en cours"},
-  {"intent": "info_query", "query": "Quel est le numero de support ?"}
-]
-
 Exemples:
 - "Bonjour" -> [{"intent": "small_talk", "query": "Bonjour"}]
 - "Quels sont mes dossiers ?" -> [{"intent": "personal_lookup", "query": "Quels sont mes dossiers ?"}]
 - "Liste mes dossiers et donne-moi le plafond dentaire" -> [{"intent": "personal_lookup", "query": "Liste mes dossiers"}, {"intent": "info_query", "query": "Quel est le plafond dentaire ?"}]"""
 
-
-# Valid intent strings for validation
-_VALID_INTENTS = {"info_query", "claim_action", "escalation", "personal_lookup", "small_talk"}
 
 # Map string -> enum
 _INTENT_MAP = {
@@ -107,41 +116,20 @@ async def decompose_node(state: ClaimsGraphState) -> dict:
         f"words={word_count})"
     )
 
-    response = await llm.ainvoke([
-        SystemMessage(content=DECOMPOSE_SYSTEM_PROMPT),
-        last_message,
-    ])
-
-    raw_text = response.content.strip()
-
-    # Strip markdown code fences if the LLM wraps JSON in ```
-    if raw_text.startswith("```"):
-        lines = raw_text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        raw_text = "\n".join(lines)
-
-    # Parse the LLM output
     try:
-        parsed = json.loads(raw_text)
+        structured_llm = llm.with_structured_output(SubIntentList)
+        result = await structured_llm.ainvoke([
+            SystemMessage(content=DECOMPOSE_SYSTEM_PROMPT),
+            last_message,
+        ])
 
-        if not isinstance(parsed, list) or len(parsed) == 0:
-            raise ValueError("Expected a non-empty JSON array")
+        sub_intents = [{"intent": si.intent, "query": si.query} for si in result.sub_intents[:4]]
 
-        # Validate and sanitize each sub-intent
-        sub_intents = []
-        for item in parsed[:4]:  # Cap at 4 sub-intents
-            intent_str = item.get("intent", "").strip().lower()
-            query_str = item.get("query", "").strip()
+        if not sub_intents:
+            raise ValueError("Empty sub_intents list")
 
-            if intent_str not in _VALID_INTENTS:
-                intent_str = "info_query"  # Safe fallback
-            if not query_str:
-                query_str = last_message.content  # Fallback to full message
-
-            sub_intents.append({"intent": intent_str, "query": query_str})
-
-    except (json.JSONDecodeError, TypeError, ValueError, KeyError) as e:
-        logger.warning(f"Decompose JSON parse failed: {e} -- raw: {raw_text[:200]}")
+    except Exception as e:
+        logger.warning(f"Decompose structured output failed: {e}")
         # Fallback: treat as single info_query
         sub_intents = [{"intent": "info_query", "query": last_message.content}]
 
@@ -157,3 +145,4 @@ async def decompose_node(state: ClaimsGraphState) -> dict:
         "sub_intents": sub_intents,
         "intent": primary_intent,
     }
+
