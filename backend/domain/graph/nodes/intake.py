@@ -9,13 +9,22 @@ Classifies the user's latest message into one of four deterministic intents:
 """
 
 import logging
+from typing import Literal
 
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage
 
 from state import ClaimsGraphState, ClaimIntent
 from backend.domain.graph.llm_factory import llm
 
 logger = logging.getLogger("I-Way-Twin")
+
+
+class IntentSchema(BaseModel):
+    """Pydantic schema for intent classification."""
+    intent: Literal["info_query", "claim_action", "escalation", "personal_lookup", "small_talk"] = Field(
+        description="The classified intent category"
+    )
 
 
 INTAKE_SYSTEM_PROMPT = """Tu es un classificateur d'intentions pour un systeme d'assurance medicale I-Way.
@@ -36,39 +45,41 @@ Analyse le dernier message de l'utilisateur et classifie-le dans EXACTEMENT UNE 
    Exemples: "Quels sont mes dossiers ?", "Qui est sur mon contrat ?", "Mon historique de soins"
 
 5. "small_talk" — Salutations, remerciements, ou politesses basiques sans requete specifique.
-   Exemples: "Bonjour", "Salut", "Merci beaucoup", "Au revoir"
+   Exemples: "Bonjour", "Salut", "Merci beaucoup", "Au revoir" """
 
-Reponds UNIQUEMENT avec le nom de la categorie, sans guillemets ni explication.
-Par exemple: info_query"""
+
+# Map string -> enum
+_INTENT_MAP = {
+    "info_query": ClaimIntent.INFO_QUERY,
+    "claim_action": ClaimIntent.CLAIM_ACTION,
+    "escalation": ClaimIntent.ESCALATION,
+    "personal_lookup": ClaimIntent.PERSONAL_LOOKUP,
+    "small_talk": ClaimIntent.SMALL_TALK,
+}
 
 
 async def intake_node(state: ClaimsGraphState) -> dict:
     """
     Node 1: Intake & Intent Classification.
 
-    Uses the LLM to classify the user's latest message into one of four
-    deterministic intents. The classification drives the conditional edge
-    that routes to the correct processing node.
+    Uses the LLM with Pydantic structured output to classify the user's
+    latest message into one of the deterministic intents.
     """
     last_message = state["messages"][-1]
 
-    response = await llm.ainvoke([
-        SystemMessage(content=INTAKE_SYSTEM_PROMPT),
-        last_message,
-    ])
+    try:
+        structured_llm = llm.with_structured_output(IntentSchema)
+        result = await structured_llm.ainvoke([
+            SystemMessage(content=INTAKE_SYSTEM_PROMPT),
+            last_message,
+        ])
 
-    # Parse the LLM response into a ClaimIntent enum
-    raw_intent = response.content.strip().lower().replace('"', '').replace("'", "")
+        intent = _INTENT_MAP.get(result.intent, ClaimIntent.INFO_QUERY)
+        logger.info(f"Intake classified intent: {intent.value} (structured: '{result.intent}')")
 
-    # Map to enum with safe fallback
-    intent_map = {
-        "info_query": ClaimIntent.INFO_QUERY,
-        "claim_action": ClaimIntent.CLAIM_ACTION,
-        "escalation": ClaimIntent.ESCALATION,
-        "personal_lookup": ClaimIntent.PERSONAL_LOOKUP,
-        "small_talk": ClaimIntent.SMALL_TALK,
-    }
-    intent = intent_map.get(raw_intent, ClaimIntent.INFO_QUERY)
+    except Exception as e:
+        logger.warning(f"Intake structured output failed: {e}, defaulting to info_query")
+        intent = ClaimIntent.INFO_QUERY
 
-    logger.info(f"Intake classified intent: {intent.value} (raw: '{raw_intent}')")
     return {"intent": intent}
+
