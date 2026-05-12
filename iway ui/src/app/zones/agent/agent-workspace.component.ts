@@ -537,7 +537,8 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.currentAgentMatricule = user?.matricule || '';
 
     this.loadQueue();
-    this.wsService.connect();
+    const token = this.authService.getToken();
+    this.wsService.connect(token || undefined);
     this.eventSub = this.wsService.getMessages().subscribe(msg => {
       if (msg.type === 'NEW_ESCALATION') {
         this.toastService.show('Nouvelle escalation reçue', 'warning');
@@ -714,7 +715,8 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   private connectToSessionWs(sessionId: string): void {
-    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${sessionId}`;
+    const token = this.authService.getToken();
+    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${sessionId}?token=${token}`;
     this.sessionSocket$ = webSocket({ url: wsUrl, deserializer: (e) => JSON.parse(e.data) });
 
     this.sessionSocket$.subscribe({

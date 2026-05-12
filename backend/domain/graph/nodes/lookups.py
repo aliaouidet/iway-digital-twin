@@ -8,13 +8,22 @@ TODO (Phase 4): Replace mock data with real iway_client calls.
 """
 
 import logging
+from typing import Literal
 
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage
 
 from state import ClaimsGraphState
 from backend.domain.graph.llm_factory import llm
 
 logger = logging.getLogger("I-Way-Twin")
+
+
+class ActionRouterSchema(BaseModel):
+    """Pydantic schema for action routing."""
+    action: Literal["dossier", "beneficiaire"] = Field(
+        description="The type of personal data lookup to perform"
+    )
 
 
 ACTION_ROUTER_PROMPT = """Tu es un routeur pour un systeme d'assurance medicale.
@@ -25,9 +34,7 @@ L'utilisateur veut acceder a ses donnees personnelles. Classifie sa demande:
    Exemples: "Mes dossiers", "Mon remboursement", "Historique de soins", "Statut de ma reclamation"
 
 2. "beneficiaire" -- Il veut voir les personnes couvertes par son contrat (famille, conjoints, enfants, ayants droit).
-   Exemples: "Qui est sur mon contrat ?", "Mes beneficiaires", "Ma famille est-elle couverte ?"
-
-Reponds UNIQUEMENT avec: dossier ou beneficiaire"""
+   Exemples: "Qui est sur mon contrat ?", "Mes beneficiaires", "Ma famille est-elle couverte ?" """
 
 
 async def action_router_node(state: ClaimsGraphState) -> dict:
@@ -40,16 +47,20 @@ async def action_router_node(state: ClaimsGraphState) -> dict:
     """
     last_message = state["messages"][-1]
 
-    response = await llm.ainvoke([
-        SystemMessage(content=ACTION_ROUTER_PROMPT),
-        last_message,
-    ])
+    try:
+        structured_llm = llm.with_structured_output(ActionRouterSchema)
+        result = await structured_llm.ainvoke([
+            SystemMessage(content=ACTION_ROUTER_PROMPT),
+            last_message,
+        ])
 
-    raw = response.content.strip().lower().replace('"', '').replace("'", "")
-    # Default to dossier if ambiguous
-    action = "dossier" if "dossier" in raw else ("beneficiaire" if "beneficiaire" in raw else "dossier")
+        action = result.action
+        logger.info(f"Action router decided: {action} (structured)")
 
-    logger.info(f"Action router decided: {action} (raw: '{raw}')")
+    except Exception as e:
+        logger.warning(f"Action router structured output failed: {e}, defaulting to dossier")
+        action = "dossier"
+
     return {"intent": state.get("intent")}  # pass-through, routing done by edge function
 
 

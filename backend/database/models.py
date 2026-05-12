@@ -69,7 +69,7 @@ class User(Base):
     matricule = Column(String(20), primary_key=True)
     nom = Column(String(100), nullable=False)
     prenom = Column(String(100), nullable=False)
-    role = Column(SAEnum(UserRole), nullable=False, default=UserRole.ADHERENT)
+    role = Column(SAEnum(UserRole, name="user_role", values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=UserRole.ADHERENT)
     email = Column(String(255), nullable=True)
     specialite = Column(String(100), nullable=True)
     password_hash = Column(String(255), nullable=False)  # Plain text for mock, bcrypt in prod
@@ -85,7 +85,7 @@ class Session(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_matricule = Column(String(20), ForeignKey("users.matricule"), nullable=False)
     agent_matricule = Column(String(20), ForeignKey("users.matricule"), nullable=True)
-    status = Column(SAEnum(SessionStatus), nullable=False, default=SessionStatus.ACTIVE)
+    status = Column(SAEnum(SessionStatus, name="session_status", values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=SessionStatus.ACTIVE)
     reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     resolved_at = Column(DateTime(timezone=True), nullable=True)
@@ -107,7 +107,7 @@ class Message(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
-    role = Column(SAEnum(MessageRole), nullable=False)
+    role = Column(SAEnum(MessageRole, name="message_role", values_callable=lambda obj: [e.value for e in obj]), nullable=False)
     content = Column(Text, nullable=False)
     confidence = Column(Float, nullable=True)
     model_used = Column(String(50), nullable=True)
@@ -127,7 +127,7 @@ class EscalationTicket(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False, unique=True)
-    priority = Column(SAEnum(EscalationPriority), nullable=False, default=EscalationPriority.MEDIUM)
+    priority = Column(SAEnum(EscalationPriority, name="escalation_priority", values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=EscalationPriority.MEDIUM)
     reason = Column(Text, nullable=True)
     status = Column(String(30), nullable=False, default="open")
     assigned_agent = Column(String(20), ForeignKey("users.matricule"), nullable=True)
@@ -147,7 +147,7 @@ class KnowledgeEmbedding(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_id = Column(String(100), nullable=False)
-    source_type = Column(SAEnum(SourceType), nullable=False, default=SourceType.IWAY_API)
+    source_type = Column(SAEnum(SourceType, name="source_type", values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=SourceType.IWAY_API)
     chunk_text = Column(Text, nullable=False)
     embedding = Column(Vector(settings.EMBEDDING_DIMENSIONS), nullable=True)
     metadata_ = Column("metadata", JSONB, nullable=True)  # Renamed to avoid Python conflict
@@ -166,7 +166,7 @@ class AICorrection(Base):
     wrong_message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id"), nullable=True)
     correct_answer = Column(Text, nullable=False)
     agent_matricule = Column(String(20), ForeignKey("users.matricule"), nullable=False)
-    correction_type = Column(SAEnum(CorrectionType), nullable=False, default=CorrectionType.FACTUAL_ERROR)
+    correction_type = Column(SAEnum(CorrectionType, name="correction_type", values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=CorrectionType.FACTUAL_ERROR)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
