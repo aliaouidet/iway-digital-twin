@@ -601,11 +601,11 @@ async def _generate_briefing_summary(
                 temperature=0.1,
             )
         else:
-            from langchain_google_vertexai import ChatVertexAI
-            llm = ChatVertexAI(
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            import os
+            llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash",
-                project=settings.GCP_PROJECT_ID,
-                location=settings.GCP_LOCATION,
+                google_api_key=os.getenv("GOOGLE_API_KEY", ""),
                 temperature=0.1,
             )
 
