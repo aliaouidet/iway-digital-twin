@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
 # Virtual environments
 venv/
 .venv/
@@ -60,3 +59,5 @@ skills-lock.json
 celerybeat-schedule
 celerybeat-schedule.*
 celerybeat.pid
+# folders
+.agents
