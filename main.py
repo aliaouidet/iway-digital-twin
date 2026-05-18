@@ -110,6 +110,35 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# --- OpenTelemetry Instrumentation ---
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.redis import RedisInstrumentor
+    from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+
+    # Setup tracing provider
+    resource = Resource.create({"service.name": "iway-digital-twin"})
+    provider = TracerProvider(resource=resource)
+    processor = BatchSpanProcessor(OTLPSpanExporter(endpoint="http://jaeger:4317", insecure=True))
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+
+    # Instrument FastAPI
+    FastAPIInstrumentor.instrument_app(app)
+    
+    # Instrument external dependencies (Redis & PostgreSQL)
+    RedisInstrumentor().instrument()
+    PsycopgInstrumentor().instrument()
+    
+    logger.info("🔭 OpenTelemetry (Jaeger) instrumentation enabled.")
+except ImportError:
+    logger.warning("⚠️ OpenTelemetry not installed. Tracing disabled.")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -210,7 +239,7 @@ async def websocket_events(websocket: WebSocket, token: str = None):
         logger.warning(f"⛔ Events WebSocket auth failed: {e}")
         return
 
-    await ws_manager.connect(websocket)
+    await ws_manager.connect(websocket, role=user.get("role", "Agent"), matricule=matricule)
     try:
         while True:
             logs = SYSTEM_LOGS

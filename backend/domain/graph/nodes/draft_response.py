@@ -195,18 +195,12 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
             "SOUS-REQUETES A ADRESSER (reponds a CHACUNE):\n" + "\n".join(items)
         )
 
-    # -- Build GraphRAG context --
+    # -- Build GraphRAG context (read from state, populated by rag_retrieval_node) --
     graph_context_section = ""
-    try:
-        from backend.services.knowledge_graph import get_related_context
-        graph_context = get_related_context(
-            query=state["messages"][-1].content,
-            retrieved_docs=retrieved_docs,
-        )
-        if graph_context:
-            graph_context_section = f"CONTEXTE GRAPHE DE CONNAISSANCES:\n{graph_context}"
-    except Exception as e:
-        logger.debug(f"GraphRAG context unavailable: {e}")
+    graph_context = state.get("graph_context") or ""
+    if graph_context:
+        graph_context_section = f"CONTEXTE GRAPHE DE CONNAISSANCES:\n{graph_context}"
+
 
     # -- Build conversation context (multi-turn memory) --
     conversation_context = ""

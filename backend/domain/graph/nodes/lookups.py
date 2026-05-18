@@ -8,60 +8,22 @@ TODO (Phase 4): Replace mock data with real iway_client calls.
 """
 
 import logging
-from typing import Literal
-
-from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage
 
 from state import ClaimsGraphState
-from backend.domain.graph.llm_factory import llm
 
 logger = logging.getLogger("I-Way-Twin")
 
 
-class ActionRouterSchema(BaseModel):
-    """Pydantic schema for action routing."""
-    action: Literal["dossier", "beneficiaire"] = Field(
-        description="The type of personal data lookup to perform"
-    )
-
-
-ACTION_ROUTER_PROMPT = """Tu es un routeur pour un systeme d'assurance medicale.
-
-L'utilisateur veut acceder a ses donnees personnelles. Classifie sa demande:
-
-1. "dossier" -- Il veut voir ses dossiers, remboursements, reclamations, historique de soins, ou le statut d'un remboursement.
-   Exemples: "Mes dossiers", "Mon remboursement", "Historique de soins", "Statut de ma reclamation"
-
-2. "beneficiaire" -- Il veut voir les personnes couvertes par son contrat (famille, conjoints, enfants, ayants droit).
-   Exemples: "Qui est sur mon contrat ?", "Mes beneficiaires", "Ma famille est-elle couverte ?" """
-
-
 async def action_router_node(state: ClaimsGraphState) -> dict:
     """
-    Action Router: LLM-powered sub-classifier for PERSONAL_LOOKUP.
+    Action Router: Deterministic pass-through for PERSONAL_LOOKUP.
 
-    Reads the user's message and decides whether to route to the
-    dossier lookup or beneficiary lookup DB tool. Stores the decision
-    in state so the conditional edge can read it.
+    Routing is handled entirely by the `route_action` conditional edge
+    using keyword matching (zero-latency, no LLM call required).
+    This node exists as a topology anchor for the conditional edge.
     """
-    last_message = state["messages"][-1]
-
-    try:
-        structured_llm = llm.with_structured_output(ActionRouterSchema)
-        result = await structured_llm.ainvoke([
-            SystemMessage(content=ACTION_ROUTER_PROMPT),
-            last_message,
-        ])
-
-        action = result.action
-        logger.info(f"Action router decided: {action} (structured)")
-
-    except Exception as e:
-        logger.warning(f"Action router structured output failed: {e}, defaulting to dossier")
-        action = "dossier"
-
-    return {"intent": state.get("intent")}  # pass-through, routing done by edge function
+    logger.info("Action router pass-through (routing delegated to edge function)")
+    return {"intent": state.get("intent")}
 
 
 async def dossier_lookup_node(state: ClaimsGraphState) -> dict:

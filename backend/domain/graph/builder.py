@@ -166,7 +166,19 @@ def build_claims_graph(checkpointer=None):
     graph.add_edge("respond", END)
 
     # -- Compile --
-    memory = checkpointer or MemorySaver()
+    # Register custom state types for msgpack checkpoint serialization
+    # (prevents "Deserializing unregistered type" warnings for ClaimIntent, RetrievedDoc, etc.)
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+    from state import ClaimIntent, RetrievedDoc, ClaimDetails
+
+    serde = JsonPlusSerializer(
+        allowed_msgpack_modules=[ClaimIntent, RetrievedDoc, ClaimDetails]
+    )
+
+    if checkpointer is None:
+        memory = MemorySaver(serde=serde)
+    else:
+        memory = checkpointer
 
     compiled = graph.compile(checkpointer=memory)
 

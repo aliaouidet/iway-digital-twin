@@ -331,16 +331,21 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     ai_result = None
                     cache_hit = False
 
-                    # -- TIER 0: Redis Cache (instant response) --
+                    # -- TIER 0: Redis Semantic Cache (instant response) --
                     try:
-                        from backend.services.response_cache import get_cached_response
-                        cached = await get_cached_response(content)
-                        if cached:
+                        from backend.services.semantic_cache import check_semantic_cache
+                        cached_text = await check_semantic_cache(content, similarity_threshold=0.95)
+                        if cached_text:
                             cache_hit = True
-                            ai_result = cached
+                            ai_result = {
+                                "text": cached_text,
+                                "confidence": 99,
+                                "source": "semantic_cache"
+                            }
                             span_cache = trace.start_span("CACHE_HIT")
-                            span_cache.finish(source="cache")
-                    except Exception:
+                            span_cache.finish(source="semantic_cache")
+                    except Exception as e:
+                        logger.warning(f"Semantic Cache check failed: {e}")
                         pass  # Cache miss — proceed to graph
 
                     # -- TIER 1: Claims StateGraph (primary) --
@@ -618,8 +623,8 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     # --- Cache store (only for high-confidence, non-cached responses) ---
                     if not cache_hit and ai_result and ai_result.get("confidence", 0) >= 70:
                         try:
-                            from backend.services.response_cache import set_cached_response
-                            asyncio.create_task(set_cached_response(content, ai_result))
+                            from backend.services.semantic_cache import store_semantic_cache
+                            asyncio.create_task(store_semantic_cache(content, ai_result.get("text", "")))
                         except Exception:
                             pass
 

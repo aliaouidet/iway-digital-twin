@@ -115,7 +115,7 @@ async def create_session(
     # Persist to PostgreSQL (fire-and-forget)
     asyncio.create_task(_persist_session_create(session_id, matricule))
 
-    # Notify agent dashboard in real time
+    # Notify agent dashboard in real time (Agent/Admin only)
     if ws_ref.manager:
         await ws_ref.manager.broadcast({
             "type": "NEW_SESSION",
@@ -127,7 +127,7 @@ async def create_session(
                 "status": "active",
                 "created_at": SESSIONS[session_id]["created_at"],
             }
-        })
+        }, target_roles={"Agent", "Admin"})
 
     return {"session_id": session_id}
 
@@ -440,7 +440,7 @@ async def takeover_session(session_id: str, matricule: str = Depends(get_current
             pass
     # Broadcast
     if ws_ref.manager:
-        await ws_ref.manager.broadcast({"type": "AGENT_JOINED", "payload": {"session_id": session_id, "agent": agent_name}})
+        await ws_ref.manager.broadcast({"type": "AGENT_JOINED", "payload": {"session_id": session_id, "agent": agent_name}}, target_roles={"Agent", "Admin"})
     logger.info(f"Agent {matricule} took over session {session_id}")
 
     # Persist status change (fire-and-forget)
@@ -500,7 +500,7 @@ async def resolve_session(
             pass
 
     if ws_ref.manager:
-        await ws_ref.manager.broadcast({"type": "SESSION_RESOLVED", "payload": {"session_id": session_id}})
+        await ws_ref.manager.broadcast({"type": "SESSION_RESOLVED", "payload": {"session_id": session_id}}, target_roles={"Agent", "Admin"})
 
     logger.info(f"Session {session_id} resolved by {matricule}")
 

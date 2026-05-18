@@ -31,7 +31,7 @@ _INJECTION_PATTERNS = [
     r"pretend\s+(you\s+are|to\s+be)",
     r"new\s+instructions?\s*:",
     # Exfiltration attempts
-    r"(show|reveal|display|print|output|return|give\s+me)\s+(all\s+)?(system|internal|hidden|secret)\s+(prompt|instructions?|data|records?|information)",
+    r"(show|reveal|display|print|output|return|give)\s+(me\s+)?(all\s+)?(the\s+)?(system|internal|hidden|secret)\s+(prompt\s+)?(instructions?|data|records?|information|prompt)",
     r"(what\s+are|tell\s+me)\s+(your|the)\s+(system\s+)?(instructions?|prompts?|rules?)",
     r"repeat\s+(your|the|all)\s+(system\s+)?(instructions?|prompts?)",
     # Token manipulation

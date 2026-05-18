@@ -30,15 +30,6 @@ _KNOWN_LIMITS = {
 
 _KNOWN_PHONES = {"71 800 800", "71800800"}
 
-# PII patterns to detect
-_PII_PATTERNS = [
-    r"\b\d{5}\b",  # 5-digit matricule
-    r"token[=:\s]+\S+",  # Token values
-    r"mot\s+de\s+passe\s*[=:\s]+\S+",  # Password values
-]
-
-_COMPILED_PII = [re.compile(p, re.IGNORECASE) for p in _PII_PATTERNS]
-
 
 async def compliance_check_node(state: ClaimsGraphState) -> dict:
     """
@@ -55,19 +46,32 @@ async def compliance_check_node(state: ClaimsGraphState) -> dict:
     if not draft:
         return {"compliance_notes": ["No draft to check"]}
 
-    # ── Check 1: PII Leakage ──────────────────────────────────
+    # ── Check 1: PII Leakage — Matricule ───────────────────────
+    # Only flag actual session identifiers, not arbitrary 5-digit numbers
     matricule = state.get("matricule", "")
-    if matricule and matricule in draft:
+    if matricule and len(matricule) >= 4 and matricule in draft:
         compliance_notes.append(f"⚠️ PII: Matricule '{matricule}' found in response")
         penalty += 0.15
         # Redact the matricule from the response
         draft = draft.replace(matricule, "[MATRICULE]")
 
+    # ── Check 1b: PII Leakage — Auth Token ────────────────────
     token = state.get("token", "")
     if token and len(token) > 5 and token in draft:
         compliance_notes.append("⚠️ PII: Auth token found in response")
         penalty += 0.20
         draft = draft.replace(token, "[TOKEN]")
+
+    # ── Check 1c: PII Leakage — Token/password patterns ───────
+    _pii_control_patterns = [
+        re.compile(r"token[=:\s]+\S+", re.IGNORECASE),
+        re.compile(r"mot\s+de\s+passe\s*[=:\s]+\S+", re.IGNORECASE),
+    ]
+    for pattern in _pii_control_patterns:
+        if pattern.search(draft):
+            compliance_notes.append(f"⚠️ PII: Credential pattern detected in response")
+            penalty += 0.10
+            break
 
     # ── Check 2: Amount Consistency ───────────────────────────
     # Extract amounts mentioned in the response

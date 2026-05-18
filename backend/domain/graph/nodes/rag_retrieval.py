@@ -35,13 +35,39 @@ async def rag_retrieval_node(state: ClaimsGraphState) -> dict:
     settings = get_settings()
     query = state["messages"][-1].content
 
-    logger.info(f"RAG retrieval for: {query[:60]}... (store={knowledge_store.count} entries)")
+    # Log with accurate store count (PGVector may be the active store, not in-memory)
+    from backend.services.rag_service import _pgvector_available
+    if _pgvector_available:
+        logger.info(f"RAG retrieval for: {query[:60]}... (store=pgvector)")
+    else:
+        logger.info(f"RAG retrieval for: {query[:60]}... (store=in-memory, {knowledge_store.count} entries)")
 
     # Step 1: Bi-encoder retrieval (top-10 candidates for reranking)
     raw_results = await async_retrieve_context(query, top_k=_RERANK_CANDIDATES)
 
+    # Step 1.5: GraphRAG — Retrieve related knowledge graph context
+    from backend.services.knowledge_graph import get_related_context
+    graph_context = get_related_context(query, raw_results)
+    graph_context_str = ""
+    
+    if graph_context:
+        logger.info("🕸️ GraphRAG: Found related knowledge graph context")
+        graph_context_str = graph_context
+        # Prepend as a synthetic document so the reranker can evaluate it
+        raw_results.insert(0, {
+            "chunk_text": f"Contexte relationnel I-Way:\n{graph_context}",
+            "metadata": {
+                "question": "Contexte métier (Graph)",
+                "reponse": graph_context,
+                "original_id": "graph-context"
+            },
+            "similarity": 1.0,  # Max similarity so it always makes it past basic filters
+            "source_id": "knowledge_graph",
+            "source_type": "graph"
+        })
+
     if not raw_results:
-        return {"retrieved_docs": [], "rag_confidence": 0.0}
+        return {"retrieved_docs": [], "rag_confidence": 0.0, "graph_context": graph_context_str}
 
     # Step 2: Cross-encoder reranking (top-10 → top-5)
     reranked = await async_rerank(query, raw_results, top_k=settings.RAG_TOP_K)
@@ -94,4 +120,6 @@ async def rag_retrieval_node(state: ClaimsGraphState) -> dict:
     return {
         "retrieved_docs": retrieved_docs,
         "rag_confidence": rag_confidence,
+        "graph_context": graph_context_str,
     }
+

@@ -81,26 +81,12 @@ def embed_hitl_feedback(self, session_id: str, question: str, corrected_answer: 
 
 def _invalidate_cache_sync(question: str):
     """Synchronous cache invalidation (runs in Celery worker thread).
-
-    Uses redis-py sync client since Celery workers are not async.
     """
     try:
-        import hashlib
-        import unicodedata
-        import redis
-
-        # Reproduce the same normalization as response_cache.py
-        text = question.lower().strip()
-        text = unicodedata.normalize("NFKD", text)
-        text = "".join(c for c in text if not unicodedata.combining(c))
-        text = " ".join(text.split())
-        query_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
-        key = f"iway:cache:llm:{query_hash}"
-
-        r = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        deleted = r.delete(key)
-        if deleted:
-            logger.info(f"[HITL] 🗑️ Cache invalidated: {key}")
-        r.close()
+        import asyncio
+        from backend.services.semantic_cache import invalidate_semantic_cache
+        # Celery workers don't have a running event loop for this simple task usually,
+        # so we spin one up just for invalidation.
+        asyncio.run(invalidate_semantic_cache(question))
     except Exception as e:
         logger.debug(f"[HITL] Cache invalidation skipped: {e}")

@@ -33,14 +33,16 @@ services:
       test: [ "CMD-SHELL", "pg_isready -U iway -d iway_db" ]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
-  # --- Redis (pub/sub, cache, Celery broker) ---
+  # --- Redis Stack (pub/sub, semantic cache, Celery broker) ---
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:latest
     container_name: iway-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-iway_redis_secret} --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    environment:
+      - REDIS_ARGS=--requirepass ${REDIS_PASSWORD:-iway_redis_secret} --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redisdata:/data
     ports:
@@ -207,6 +209,19 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  # --- Jaeger (OpenTelemetry Distributed Tracing) ---
+  # URL: http://localhost:16686
+  # Shows: Request traces, parallel execution spans, flame graphs
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: iway-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Web UI
+      - "4317:4317"   # OTLP gRPC receiver
     restart: unless-stopped
 
   # --- Angular Frontend (Development Server) ---

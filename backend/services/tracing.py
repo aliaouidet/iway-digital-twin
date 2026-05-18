@@ -258,6 +258,6 @@ async def broadcast_trace(trace: RequestTrace):
             await _ws_manager_ref.broadcast({
                 "type": "PIPELINE_TRACE",
                 "payload": trace.to_dict(),
-            })
+            }, target_roles={"Agent", "Admin"})
         except Exception as e:
             logger.error(f"Failed to broadcast trace: {e}")

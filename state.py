@@ -149,6 +149,7 @@ class ClaimsGraphState(TypedDict):
     # ── RAG Retrieval ─────────────────────────────────────────
     retrieved_docs: Annotated[list[RetrievedDoc], replace_list]
     rag_confidence: Optional[float]    # 0.0 to 1.0
+    graph_context: Optional[str]       # GraphRAG context from knowledge graph traversal
 
     # ── Claim Processing ──────────────────────────────────────
     claim_details: Annotated[Optional[ClaimDetails], merge_claim_details]
