@@ -107,23 +107,38 @@ def route_action(
 
 def route_by_confidence(
     state: ClaimsGraphState,
-) -> Literal["respond", "clarification", "handoff"]:
+) -> Literal["respond", "clarification", "handoff", "draft_response"]:
     """
-    3-way conditional edge after draft_response_node.
+    4-way conditional edge after compliance_check_node.
 
     Decision tree:
       1. confidence >= 0.70  →  respond directly (auto-respond)
-      2. confidence < 0.70 AND claim_details has missing required fields
+      2. compliance_notes exist AND retry_count < 2
+                              →  draft_response (SELF-CORRECTION: retry with error context)
+      3. confidence < 0.70 AND claim_details has missing required fields
                               →  clarification (ask user for the gaps)
-      3. confidence < 0.70 AND claim_details is complete
+      4. confidence < 0.70 AND claim_details is complete
                               →  handoff (async transfer to human supervisor)
     """
     CONFIDENCE_THRESHOLD = 0.70
+    MAX_RETRIES = 2
+
     confidence = state.get("confidence", 0.0) or 0.0
+    compliance_notes = state.get("compliance_notes") or []
+    retry_count = state.get("retry_count", 0) or 0
 
     if confidence >= CONFIDENCE_THRESHOLD:
         logger.info(f"Confidence {confidence:.2f} >= {CONFIDENCE_THRESHOLD} -> auto-respond")
         return "respond"
+
+    # ── Self-Correction: compliance flagged issues + retries left ──
+    if compliance_notes and retry_count < MAX_RETRIES:
+        logger.info(
+            f"🔄 Self-correction triggered: {len(compliance_notes)} compliance issue(s), "
+            f"retry {retry_count + 1}/{MAX_RETRIES}. "
+            f"Issues: {', '.join(compliance_notes[:3])}"
+        )
+        return "draft_response"
 
     # Low confidence — check if we're missing claim data
     claim_details = state.get("claim_details")

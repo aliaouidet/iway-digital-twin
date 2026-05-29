@@ -46,8 +46,7 @@ interface ChatThread {
     ])
   ],
   template: `
-    <div class="h-screen flex transition-colors duration-300"
-      [class]="isDark() ? 'bg-[#020617]' : 'bg-slate-50'">
+    <div class="h-screen flex transition-colors duration-300 bg-slate-50 dark:bg-[#020617]">
 
       <!-- Mobile Backdrop -->
       <div *ngIf="isSidebarOpen() && !isDesktopMode" 
@@ -55,31 +54,25 @@ interface ChatThread {
            class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 lg:hidden transition-opacity">
       </div>
 
-      <!-- Left Sidebar: Chat History -->
-      <aside class="w-72 flex flex-col border-r flex-shrink-0 absolute lg:relative z-50 h-full transition-transform duration-300 transform"
+      <aside class="w-72 flex flex-col border-r flex-shrink-0 absolute lg:relative z-50 h-full transition-transform duration-300 transform bg-white border-slate-200 dark:bg-[#0F172A] dark:border-slate-800"
         [class.translate-x-0]="isSidebarOpen() || isDesktopMode"
-        [class.-translate-x-full]="!isSidebarOpen() && !isDesktopMode"
-        [class]="isDark() ? 'bg-[#0F172A] border-slate-800' : 'bg-white border-slate-200'">
+        [class.-translate-x-full]="!isSidebarOpen() && !isDesktopMode">
         <!-- Sidebar Header -->
-        <div class="h-16 flex items-center justify-between px-4 border-b flex-shrink-0"
-          [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
+        <div class="h-16 flex items-center justify-between px-4 border-b flex-shrink-0 border-slate-200 dark:border-slate-800">
           <div class="flex items-center gap-2">
             <div class="w-[80px] md:w-[110px] flex-shrink-0">
-              <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
+              <app-iway-logo width="100%"></app-iway-logo>
             </div>
           </div>
           <div class="flex items-center gap-1 z-10 relative">
-            <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-500' : 'hover:bg-slate-100 text-slate-400'">
-              <svg *ngIf="isDark()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
-              <svg *ngIf="!isDark()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+            <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
+              <svg class="w-3.5 h-3.5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
+              <svg class="w-3.5 h-3.5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
             </button>
-            <button (click)="logout()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hidden md:flex"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-500 hover:text-rose-400' : 'hover:bg-slate-100 text-slate-400 hover:text-rose-500'">
+            <button (click)="logout()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hidden md:flex hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
             </button>
-            <button (click)="closeSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'">
+            <button (click)="closeSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -87,8 +80,7 @@ interface ChatThread {
 
         <!-- New Chat Button -->
         <div class="px-3 py-3">
-          <button (click)="createNewChat()" class="w-full py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-2"
-            [class]="isDark() ? 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 border border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'">
+          <button (click)="createNewChat()" class="w-full py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:hover:bg-indigo-500/20 dark:border-indigo-500/20">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
             Nouvelle conversation
           </button>
@@ -99,8 +91,7 @@ interface ChatThread {
           
           <!-- Active Chats Dropdown -->
           <div>
-            <button (click)="isActiveChatsOpen.set(!isActiveChatsOpen())" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800/50 text-slate-300' : 'hover:bg-slate-100/50 text-slate-700'">
+            <button (click)="isActiveChatsOpen.set(!isActiveChatsOpen())" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors cursor-pointer hover:bg-slate-100/50 text-slate-700 dark:hover:bg-slate-800/50 dark:text-slate-300">
               <div class="flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                 <span class="text-[10px] font-semibold uppercase tracking-wider">Actives ({{activeThreads().length}})</span>
@@ -113,23 +104,21 @@ interface ChatThread {
                 class="w-full text-left p-2.5 rounded-xl transition-all cursor-pointer mb-1"
                 [class]="getChatItemClass(chat)">
                 <div class="flex items-center justify-between mb-0.5">
-                  <span class="text-[9px] font-medium" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">{{formatDate(chat.created_at)}}</span>
-                  <span *ngIf="chat.status === 'handoff_pending'" class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
-                    [class]="isDark() ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-600'">Agent</span>
+                  <span class="text-[9px] font-medium text-slate-400 dark:text-slate-500">{{formatDate(chat.created_at)}}</span>
+                  <span *ngIf="chat.status === 'handoff_pending'" class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">Agent</span>
                 </div>
-                <p class="text-[11px] truncate" [class]="isDark() ? 'text-slate-400' : 'text-slate-600'">{{chat.last_message || 'Nouvelle conversation'}}</p>
-                <span class="text-[9px] mt-0.5 block" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">{{chat.message_count}} messages</span>
+                <p class="text-[11px] truncate text-slate-600 dark:text-slate-400">{{chat.last_message || 'Nouvelle conversation'}}</p>
+                <span class="text-[9px] mt-0.5 block text-slate-400 dark:text-slate-600">{{chat.message_count}} messages</span>
               </button>
               <div *ngIf="activeThreads().length === 0" class="text-center py-4">
-                <p class="text-[10px]" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">Aucune conversation active</p>
+                <p class="text-[10px] text-slate-400 dark:text-slate-600">Aucune conversation active</p>
               </div>
             </div>
           </div>
 
           <!-- Resolved Chats Dropdown -->
           <div>
-            <button (click)="isResolvedChatsOpen.set(!isResolvedChatsOpen())" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800/50 text-slate-300' : 'hover:bg-slate-100/50 text-slate-700'">
+            <button (click)="isResolvedChatsOpen.set(!isResolvedChatsOpen())" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors cursor-pointer hover:bg-slate-100/50 text-slate-700 dark:hover:bg-slate-800/50 dark:text-slate-300">
               <div class="flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 <span class="text-[10px] font-semibold uppercase tracking-wider">Résolues ({{resolvedThreads().length}})</span>
@@ -142,15 +131,14 @@ interface ChatThread {
                 class="w-full text-left p-2.5 rounded-xl transition-all cursor-pointer mb-1"
                 [class]="getChatItemClass(chat)">
                 <div class="flex items-center justify-between mb-0.5">
-                  <span class="text-[9px] font-medium" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">{{formatDate(chat.created_at)}}</span>
-                  <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
-                    [class]="isDark() ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'">Résolu</span>
+                  <span class="text-[9px] font-medium text-slate-400 dark:text-slate-500">{{formatDate(chat.created_at)}}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">Résolu</span>
                 </div>
-                <p class="text-[11px] truncate" [class]="isDark() ? 'text-slate-400' : 'text-slate-600'">{{chat.last_message || 'Nouvelle conversation'}}</p>
-                <span class="text-[9px] mt-0.5 block" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">{{chat.message_count}} messages</span>
+                <p class="text-[11px] truncate text-slate-600 dark:text-slate-400">{{chat.last_message || 'Nouvelle conversation'}}</p>
+                <span class="text-[9px] mt-0.5 block text-slate-400 dark:text-slate-600">{{chat.message_count}} messages</span>
               </button>
               <div *ngIf="resolvedThreads().length === 0" class="text-center py-4">
-                <p class="text-[10px]" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">Aucune conversation résolue</p>
+                <p class="text-[10px] text-slate-400 dark:text-slate-600">Aucune conversation résolue</p>
               </div>
             </div>
           </div>
@@ -161,65 +149,59 @@ interface ChatThread {
       <!-- Main Chat Panel -->
       <main class="flex-1 flex flex-col">
         <!-- Header -->
-        <header class="h-16 flex items-center justify-between px-4 md:px-6 border-b flex-shrink-0 transition-colors relative z-30"
-          [class]="isDark() ? 'bg-[#0F172A]/80 border-slate-800 backdrop-blur-md' : 'bg-white/80 border-slate-200 backdrop-blur-md'">
+        <header class="h-16 flex items-center justify-between px-4 md:px-6 border-b flex-shrink-0 transition-colors relative z-30 bg-white/80 border-slate-200 backdrop-blur-md dark:bg-[#0F172A]/80 dark:border-slate-800">
           <div class="flex items-center gap-2 md:gap-3 min-w-0">
-            <button (click)="toggleSidebar()" class="lg:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0" [class]="isDark() ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'">
+            <button (click)="toggleSidebar()" class="lg:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0 hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300">
                 <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
             </button>
             <div class="w-8 h-8 md:w-9 md:h-9 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 flex-shrink-0">
               <svg class="w-4 h-4 md:w-5 md:h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
             </div>
             <div class="truncate">
-              <span class="text-sm md:text-base font-bold truncate" style="font-family: 'Figtree', sans-serif;"
-                [class]="isDark() ? 'text-white' : 'text-slate-900'">I-Way Assistant</span>
+              <span class="text-sm md:text-base font-bold truncate text-slate-900 dark:text-white" style="font-family: 'Figtree', sans-serif;">I-Way Assistant</span>
               <div class="flex items-center gap-1.5">
                 <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" [class]="isConnected() ? 'bg-emerald-400' : 'bg-slate-400'"></span><span class="relative inline-flex rounded-full h-2 w-2" [class]="isConnected() ? 'bg-emerald-500' : 'bg-slate-500'"></span></span>
-                <span class="text-[9px] md:text-[10px] font-medium" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">{{isConnected() ? 'En ligne' : 'Connexion...'}}</span>
+                <span class="text-[9px] md:text-[10px] font-medium text-slate-400 dark:text-slate-500">{{isConnected() ? 'En ligne' : 'Connexion...'}}</span>
               </div>
             </div>
           </div>
           <div class="flex items-center gap-1 md:gap-2 flex-shrink-0">
             <button *ngIf="!isHandoffActive() && sessionId" (click)="requestHandoff()"
-              class="px-2.5 md:px-4 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
-              [class]="isDark() ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20' : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200'">
+              class="px-2.5 md:px-4 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:hover:bg-rose-500/20 dark:border-rose-500/20">
               <svg class="w-3.5 h-3.5 hidden md:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
               Parler à un agent
             </button>
-            <button (click)="logout()" class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-500 hover:text-rose-400' : 'hover:bg-slate-100 text-slate-400 hover:text-rose-500'">
+            <button (click)="logout()" class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
             </button>
           </div>
         </header>
 
         <!-- Handoff Banner (keep chatting) -->
-        <div *ngIf="isHandoffPending()" class="px-6 py-3 flex items-center gap-3 border-b animate-fade-in"
-          [class]="isDark() ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-200'">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" [class]="isDark() ? 'bg-amber-500/20' : 'bg-amber-100'">
-            <svg class="w-4 h-4 animate-pulse" [class]="isDark() ? 'text-amber-400' : 'text-amber-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div *ngIf="isHandoffPending()" class="px-6 py-3 flex items-center gap-3 border-b animate-fade-in bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-amber-100 dark:bg-amber-500/20">
+            <svg class="w-4 h-4 animate-pulse text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           </div>
           <div>
-            <p class="text-xs font-semibold" [class]="isDark() ? 'text-amber-300' : 'text-amber-800'">
+            <p class="text-xs font-semibold text-amber-800 dark:text-amber-300">
               Un agent va vous rejoindre bientôt
             </p>
-            <p class="text-[10px]" [class]="isDark() ? 'text-amber-400/70' : 'text-amber-600'">
+            <p class="text-[10px] text-amber-600 dark:text-amber-400/70">
               Vous pouvez continuer à poser des questions en attendant.
             </p>
           </div>
         </div>
 
         <!-- Agent Joined Banner -->
-        <div *ngIf="agentName()" class="px-6 py-3 flex items-center gap-3 border-b animate-fade-in"
-          [class]="isDark() ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" [class]="isDark() ? 'bg-emerald-500/20' : 'bg-emerald-100'">
-            <svg class="w-4 h-4" [class]="isDark() ? 'text-emerald-400' : 'text-emerald-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div *ngIf="agentName()" class="px-6 py-3 flex items-center gap-3 border-b animate-fade-in bg-emerald-50 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/20">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-emerald-100 dark:bg-emerald-500/20">
+            <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           </div>
           <div>
-            <p class="text-xs font-semibold" [class]="isDark() ? 'text-emerald-300' : 'text-emerald-800'">
+            <p class="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
               {{agentName()}} a rejoint la conversation
             </p>
-            <p class="text-[10px]" [class]="isDark() ? 'text-emerald-400/70' : 'text-emerald-600'">
+            <p class="text-[10px] text-emerald-600 dark:text-emerald-400/70">
               Vous discutez maintenant avec un agent. Il a lu le résumé de votre conversation.
             </p>
           </div>
@@ -229,19 +211,16 @@ interface ChatThread {
         <div #messageContainer class="flex-1 overflow-y-auto px-4 py-6 space-y-4 custom-scrollbar">
           <!-- Welcome (no active session yet) -->
           <div *ngIf="messages().length === 0" class="flex flex-col items-center justify-center h-full text-center px-4">
-            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-              [class]="isDark() ? 'bg-indigo-500/10' : 'bg-indigo-50'">
-              <svg class="w-8 h-8" [class]="isDark() ? 'text-indigo-400' : 'text-indigo-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-5 bg-indigo-50 dark:bg-indigo-500/10">
+              <svg class="w-8 h-8 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
             </div>
-            <h2 class="text-xl font-bold mb-2" style="font-family: 'Figtree', sans-serif;"
-              [class]="isDark() ? 'text-white' : 'text-slate-900'">Bienvenue sur I-Way Support</h2>
-            <p class="text-sm max-w-sm" [class]="isDark() ? 'text-slate-500' : 'text-slate-500'">
+            <h2 class="text-xl font-bold mb-2 text-slate-900 dark:text-white" style="font-family: 'Figtree', sans-serif;">Bienvenue sur I-Way Support</h2>
+            <p class="text-sm max-w-sm text-slate-500 dark:text-slate-500">
               Posez vos questions sur la couverture, les remboursements ou toute question d'assurance.
             </p>
             <div class="flex flex-wrap gap-2 mt-6 justify-center">
               <button *ngFor="let q of quickQuestions" (click)="sendQuickQuestion(q)"
-                class="px-3.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer"
-                [class]="isDark() ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'">
+                class="px-3.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 dark:border-slate-700">
                 {{q}}
               </button>
             </div>
@@ -251,8 +230,7 @@ interface ChatThread {
           <div *ngFor="let msg of messages(); trackBy: trackByIdx">
             <!-- System Message -->
             <div *ngIf="msg.role === 'system'" class="flex justify-center">
-              <div class="px-4 py-2 rounded-full text-xs font-medium"
-                [class]="isDark() ? 'bg-slate-800/50 text-slate-500' : 'bg-slate-100 text-slate-500'" [innerHTML]="formatMessage(msg.content)">
+              <div class="px-4 py-2 rounded-full text-xs font-medium bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500" [innerHTML]="formatMessage(msg.content)">
               </div>
             </div>
             <!-- User Message -->
@@ -263,28 +241,28 @@ interface ChatThread {
             <!-- AI / Agent Message -->
             <div *ngIf="msg.role === 'assistant' || msg.role === 'agent'" class="flex justify-start gap-2.5">
               <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-1"
-                [class]="msg.role === 'agent'
-                  ? (isDark() ? 'bg-amber-500/20' : 'bg-amber-100')
-                  : msg.is_handoff_ai
-                    ? (isDark() ? 'bg-orange-500/10' : 'bg-orange-50')
-                    : (isDark() ? 'bg-indigo-500/10' : 'bg-indigo-50')">
-                <svg *ngIf="msg.role === 'assistant' && !msg.is_handoff_ai" class="w-3.5 h-3.5" [class]="isDark() ? 'text-indigo-400' : 'text-indigo-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
-                <svg *ngIf="msg.is_handoff_ai" class="w-3.5 h-3.5" [class]="isDark() ? 'text-orange-400' : 'text-orange-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <svg *ngIf="msg.role === 'agent'" class="w-3.5 h-3.5" [class]="isDark() ? 'text-amber-400' : 'text-amber-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+                [ngClass]="{
+                  'bg-amber-100 dark:bg-amber-500/20': msg.role === 'agent',
+                  'bg-orange-50 dark:bg-orange-500/10': msg.role !== 'agent' && msg.is_handoff_ai,
+                  'bg-indigo-50 dark:bg-indigo-500/10': msg.role !== 'agent' && !msg.is_handoff_ai
+                }">
+                <svg *ngIf="msg.role === 'assistant' && !msg.is_handoff_ai" class="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                <svg *ngIf="msg.is_handoff_ai" class="w-3.5 h-3.5 text-orange-500 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <svg *ngIf="msg.role === 'agent'" class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
               </div>
               <div>
                 <!-- Handoff AI badge -->
                 <div *ngIf="msg.is_handoff_ai" class="mb-1">
-                  <span class="px-2 py-0.5 rounded-full text-[9px] font-semibold"
-                    [class]="isDark() ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-orange-50 text-orange-600 border border-orange-200'">
+                  <span class="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/20">
                     ⏳ En attendant l'agent
                   </span>
                 </div>
-                <div class="max-w-[75%] px-4 py-3 rounded-2xl rounded-bl-md text-sm"
-                  [class]="msg.is_handoff_ai
-                    ? (isDark() ? 'bg-orange-500/5 border border-orange-500/20 text-orange-200' : 'bg-orange-50 border border-orange-200 text-orange-900')
-                    : (isDark() ? 'bg-[#0F172A] border border-slate-800 text-slate-300' : 'bg-white border border-slate-200 text-slate-700 shadow-sm')">
-                  <span [innerHTML]="formatMessage(msg.content)"></span><span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 ml-0.5 rounded-sm animate-pulse" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'"></span>
+                <div class="max-w-[75%] px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm border"
+                  [ngClass]="{
+                    'bg-orange-50 border-orange-200 text-orange-900 dark:bg-orange-500/5 dark:border-orange-500/20 dark:text-orange-200': msg.is_handoff_ai,
+                    'bg-white border-slate-200 text-slate-700 dark:bg-[#0F172A] dark:border-slate-800 dark:text-slate-300': !msg.is_handoff_ai
+                  }">
+                  <span [innerHTML]="formatMessage(msg.content)"></span><span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 ml-0.5 rounded-sm animate-pulse bg-indigo-500 dark:bg-indigo-400"></span>
                 </div>
               </div>
             </div>
@@ -292,19 +270,17 @@ interface ChatThread {
 
           <!-- Thinking indicator -->
           <div *ngIf="isThinking()" class="flex justify-start gap-2.5">
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-              [class]="isDark() ? 'bg-indigo-500/10' : 'bg-indigo-50'">
-              <svg class="w-3.5 h-3.5" [class]="isDark() ? 'text-indigo-400' : 'text-indigo-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-indigo-50 dark:bg-indigo-500/10">
+              <svg class="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
             </div>
-            <div class="px-4 py-3 rounded-2xl rounded-bl-md"
-              [class]="isDark() ? 'bg-[#0F172A] border border-slate-800' : 'bg-white border border-slate-200 shadow-sm'">
+            <div class="px-4 py-3 rounded-2xl rounded-bl-md bg-white border border-slate-200 shadow-sm dark:bg-[#0F172A] dark:border-slate-800">
               <div class="flex items-center gap-3">
                 <div class="flex gap-1">
-                  <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 0ms"></span>
-                  <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 150ms"></span>
-                  <span class="w-2 h-2 rounded-full animate-bounce" [class]="isDark() ? 'bg-indigo-400' : 'bg-indigo-500'" style="animation-delay: 300ms"></span>
+                  <span class="w-2 h-2 rounded-full animate-bounce bg-indigo-500 dark:bg-indigo-400" style="animation-delay: 0ms"></span>
+                  <span class="w-2 h-2 rounded-full animate-bounce bg-indigo-500 dark:bg-indigo-400" style="animation-delay: 150ms"></span>
+                  <span class="w-2 h-2 rounded-full animate-bounce bg-indigo-500 dark:bg-indigo-400" style="animation-delay: 300ms"></span>
                 </div>
-                <span *ngIf="thinkingStatus()" class="text-[10px] font-medium animate-pulse" [class]="isDark() ? 'text-indigo-400/70' : 'text-indigo-500/70'">
+                <span *ngIf="thinkingStatus()" class="text-[10px] font-medium animate-pulse text-indigo-500/70 dark:text-indigo-400/70">
                   {{thinkingStatus()}}
                 </span>
               </div>
@@ -313,22 +289,19 @@ interface ChatThread {
         </div>
 
         <!-- CSAT Feedback Widget -->
-        <div *ngIf="isSessionResolved() && !feedbackGiven()" class="px-4 py-4 border-t flex-shrink-0 transition-all"
-          [class]="isDark() ? 'bg-indigo-500/5 border-indigo-500/20' : 'bg-indigo-50 border-indigo-200'">
+        <div *ngIf="isSessionResolved() && !feedbackGiven()" class="px-4 py-4 border-t flex-shrink-0 transition-all bg-indigo-50 border-indigo-200 dark:bg-indigo-500/5 dark:border-indigo-500/20">
           <div class="max-w-3xl mx-auto">
             <div *ngIf="!showFeedbackComment()" class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <svg class="w-4 h-4" [class]="isDark() ? 'text-indigo-400' : 'text-indigo-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"/></svg>
-                <span class="text-xs font-semibold" [class]="isDark() ? 'text-indigo-300' : 'text-indigo-700'">Cette conversation vous a-t-elle été utile ?</span>
+                <svg class="w-4 h-4 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"/></svg>
+                <span class="text-xs font-semibold text-indigo-700 dark:text-indigo-300">Cette conversation vous a-t-elle été utile ?</span>
               </div>
               <div class="flex items-center gap-2">
-                <button (click)="submitFeedback('positive')" class="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-                  [class]="isDark() ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200'">
+                <button (click)="submitFeedback('positive')" class="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 dark:border-emerald-500/20">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.633 10.5c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 012.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 00.322-1.672V3a.75.75 0 01.75-.75A2.25 2.25 0 0116.5 4.5c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 01-2.649 7.521c-.388.482-.987.729-1.605.729H13.48c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 00-1.423-.23H5.904M14.25 9h2.25M5.904 18.75c.083.205.173.405.27.602.197.4-.078.898-.523.898h-.908c-.889 0-1.713-.518-1.972-1.368a12 12 0 01-.521-3.507c0-1.553.295-3.036.831-4.398C3.387 10.203 4.167 9.75 5 9.75h1.053c.472 0 .745.556.5.96a8.958 8.958 0 00-1.302 4.665c0 1.194.232 2.333.654 3.375z"/></svg>
                   Oui
                 </button>
-                <button (click)="showFeedbackComment.set(true); feedbackRating = 'negative'" class="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-rose-500/50"
-                  [class]="isDark() ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20' : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200'">
+                <button (click)="showFeedbackComment.set(true); feedbackRating = 'negative'" class="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-rose-500/50 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:hover:bg-rose-500/20 dark:border-rose-500/20">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7.5 15h2.25m8.024-9.75c.011.05.028.1.052.148.591 1.2.924 2.55.924 3.977a8.96 8.96 0 01-.999 4.125m.023-8.25c-.076-.365.183-.75.575-.75h.908c.889 0 1.713.518 1.972 1.368.339 1.11.521 2.287.521 3.507 0 1.553-.295 3.036-.831 4.398-.306.774-1.086 1.227-1.918 1.227h-1.053c-.472 0-.745-.556-.5-.96a8.95 8.95 0 00.303-.54m.023-8.25H16.48a4.5 4.5 0 01-1.423-.23l-3.114-1.04a4.5 4.5 0 00-1.423-.23H6.504c-.618 0-1.217.247-1.605.729A11.95 11.95 0 002.25 12c0 .434.023.863.068 1.285C2.427 14.306 3.346 15 4.372 15h3.126c.618 0 .991.724.725 1.282A7.471 7.471 0 007.5 19.5a2.25 2.25 0 002.25 2.25.75.75 0 00.75-.75v-.633c0-.573.11-1.14.322-1.672.304-.76.93-1.33 1.653-1.715a9.04 9.04 0 002.86-2.4c.498-.634 1.226-1.08 2.032-1.08h.384"/></svg>
                   Non
                 </button>
@@ -336,13 +309,12 @@ interface ChatThread {
             </div>
             <!-- Comment input for negative feedback -->
             <div *ngIf="showFeedbackComment()" class="space-y-3">
-              <p class="text-xs font-semibold" [class]="isDark() ? 'text-rose-300' : 'text-rose-700'">Qu'est-ce qui pourrait être amélioré ?</p>
+              <p class="text-xs font-semibold text-rose-700 dark:text-rose-300">Qu'est-ce qui pourrait être amélioré ?</p>
               <textarea [(ngModel)]="feedbackComment" rows="2" placeholder="Votre commentaire (optionnel)..."
-                class="w-full px-3 py-2 rounded-lg text-xs transition-all focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
-                [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400'"></textarea>
+                class="w-full px-3 py-2 rounded-lg text-xs transition-all focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none bg-white border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500"></textarea>
               <div class="flex gap-2">
                 <button (click)="submitFeedback('negative')" class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-rose-600 hover:bg-rose-500 text-white focus:outline-none focus:ring-2 focus:ring-rose-500/50">Envoyer</button>
-                <button (click)="showFeedbackComment.set(false)" class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors" [class]="isDark() ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-600 border border-slate-200'">Annuler</button>
+                <button (click)="showFeedbackComment.set(false)" class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-white text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-transparent">Annuler</button>
               </div>
             </div>
             <!-- Thank you message -->
@@ -350,20 +322,17 @@ interface ChatThread {
         </div>
 
         <!-- Thank you after feedback -->
-        <div *ngIf="feedbackGiven()" class="px-4 py-3 border-t flex-shrink-0 text-center"
-          [class]="isDark() ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'">
-          <p class="text-xs font-semibold" [class]="isDark() ? 'text-emerald-400' : 'text-emerald-700'">Merci pour votre retour !</p>
+        <div *ngIf="feedbackGiven()" class="px-4 py-3 border-t flex-shrink-0 text-center bg-emerald-50 border-emerald-200 dark:bg-emerald-500/5 dark:border-emerald-500/20">
+          <p class="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Merci pour votre retour !</p>
         </div>
 
         <!-- Input -->
-        <div *ngIf="!isSessionResolved()" class="px-4 py-4 border-t flex-shrink-0 transition-colors"
-          [class]="isDark() ? 'bg-[#0F172A]/60 border-slate-800' : 'bg-white border-slate-200'">
+        <div *ngIf="!isSessionResolved()" class="px-4 py-4 border-t flex-shrink-0 transition-colors bg-white border-slate-200 dark:bg-[#0F172A]/60 dark:border-slate-800">
           <form (ngSubmit)="sendMessage()" class="flex items-end gap-3 max-w-3xl mx-auto">
             <div class="flex-1 relative">
               <textarea [(ngModel)]="newMessage" name="msg" rows="1"
                 placeholder="Écrivez votre message..."
-                class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
-                [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400'"
+                class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500"
                 (keydown.enter)="$any($event).shiftKey ? null : onEnter($event)"></textarea>
             </div>
             <button type="submit" [disabled]="!newMessage.trim()"
@@ -424,7 +393,6 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     private toastService: ToastService
   ) { }
 
-  isDark = () => this.themeService.isDark();
   toggleTheme = () => this.themeService.toggleTheme();
 
   formatMessage(text: string): string {
@@ -560,13 +528,10 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   getChatItemClass(chat: ChatThread): string {
     const active = chat.id === this.sessionId;
-    if (this.isDark()) {
-      if (active) return 'bg-indigo-500/10 border border-indigo-500/30';
-      return 'hover:bg-slate-800/50 border border-transparent';
-    } else {
-      if (active) return 'bg-indigo-50 border border-indigo-200';
-      return 'hover:bg-slate-50 border border-transparent';
+    if (active) {
+      return 'bg-indigo-50 border border-indigo-200 dark:bg-indigo-500/10 dark:border-indigo-500/30';
     }
+    return 'hover:bg-slate-50 border border-transparent dark:hover:bg-slate-800/50';
   }
 
   // ─── WebSocket ───

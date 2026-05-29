@@ -142,7 +142,7 @@ def build_claims_graph(checkpointer=None):
     # Draft → Compliance Check (rule-based verification)
     graph.add_edge("draft_response", "compliance_check")
 
-    # Compliance Check → Route by confidence (3-way branch)
+    # Compliance Check → Route by confidence (4-way branch including self-correction)
     graph.add_conditional_edges(
         "compliance_check",
         route_by_confidence,
@@ -150,6 +150,7 @@ def build_claims_graph(checkpointer=None):
             "respond": "respond",
             "clarification": "clarification",
             "handoff": "handoff",
+            "draft_response": "draft_response",   # Self-correction loop
         },
     )
 

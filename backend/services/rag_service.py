@@ -115,7 +115,7 @@ def _get_pgvector_store():
     if _pgvector_available is False and _pgvector_store is None:
         try:
             from langchain_community.vectorstores import PGVector
-            from langchain_community.embeddings import HuggingFaceEmbeddings
+            from langchain_huggingface import HuggingFaceEmbeddings
             
             conn_str = _build_pgvector_connection_string()
             
@@ -130,6 +130,7 @@ def _get_pgvector_store():
                 connection_string=conn_str,
                 embedding_function=embeddings,
                 pre_delete_collection=False,  # Preserve existing data
+                use_jsonb=True,               # Use JSONB for efficient metadata filtering
             )
             _pgvector_available = True
             logger.info(f"🗄️ PGVector store initialized (collection: iway_knowledge)")

@@ -14,6 +14,9 @@ from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from backend.database.connection import get_db
+from backend.database.repositories import get_audit_stats, get_recent_audit_logs, get_audit_time_series, get_hourly_traffic
 
 from backend.routers.auth import get_current_user, require_role
 
@@ -22,26 +25,7 @@ logger = logging.getLogger("I-Way-Twin")
 router = APIRouter(prefix="/api/v1", tags=["Monitoring"])
 
 
-# --- In-memory stores (same as original main.py) ---
-
-SYSTEM_LOGS = [
-    {"id": "L001", "timestamp": "2026-04-13 19:07:12", "user_id": "12345", "query": "Comment ajouter un beneficiaire ?", "top_similarity": 0.94, "chunks_retrieved": 3, "gen_time_ms": 820, "tokens_used": 842, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 94},
-    {"id": "L002", "timestamp": "2026-04-13 19:06:55", "user_id": "12345", "query": "Quel est le delai de remboursement ?", "top_similarity": 0.88, "chunks_retrieved": 3, "gen_time_ms": 750, "tokens_used": 921, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 88},
-    {"id": "L003", "timestamp": "2026-04-13 19:05:30", "user_id": "99999", "query": "Comment facturer un acte hors nomenclature ?", "top_similarity": 0.71, "chunks_retrieved": 2, "gen_time_ms": 1140, "tokens_used": 1203, "outcome": "AI_FALLBACK", "model": "gemini-2.5-flash", "confidence": 71},
-    {"id": "L004", "timestamp": "2026-04-13 19:04:01", "user_id": "12345", "query": "Je veux parler a un humain", "top_similarity": 0.38, "chunks_retrieved": 1, "gen_time_ms": 2310, "tokens_used": 1842, "outcome": "HUMAN_ESCALATED", "model": "gemini-2.5-flash", "confidence": 38},
-    {"id": "L005", "timestamp": "2026-04-13 19:03:44", "user_id": "12345", "query": "Prise en charge hospitaliere urgence", "top_similarity": 0.96, "chunks_retrieved": 3, "gen_time_ms": 610, "tokens_used": 703, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 96},
-    {"id": "L006", "timestamp": "2026-04-13 19:02:18", "user_id": "99999", "query": "Erreur de connexion au portail prestataire", "top_similarity": 0.29, "chunks_retrieved": 1, "gen_time_ms": 3100, "tokens_used": 2102, "outcome": "ERROR", "model": "gemini-2.5-flash", "confidence": 15},
-    {"id": "L007", "timestamp": "2026-04-13 19:01:05", "user_id": "12345", "query": "Quel est le plafond pour les soins dentaires ?", "top_similarity": 0.92, "chunks_retrieved": 3, "gen_time_ms": 690, "tokens_used": 780, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 92},
-    {"id": "L008", "timestamp": "2026-04-13 19:00:22", "user_id": "12345", "query": "Quelle est la prime de naissance ?", "top_similarity": 0.91, "chunks_retrieved": 3, "gen_time_ms": 870, "tokens_used": 910, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 91},
-    {"id": "L009", "timestamp": "2026-04-14 10:15:30", "user_id": "12345", "query": "Quels sont mes dossiers en cours ?", "top_similarity": 0.0, "chunks_retrieved": 0, "gen_time_ms": 1250, "tokens_used": 1100, "outcome": "AGENT_RESOLVED", "model": "gemini-2.5-flash", "confidence": 90},
-    {"id": "L010", "timestamp": "2026-04-14 10:20:45", "user_id": "12345", "query": "Les vaccins sont-ils couverts ?", "top_similarity": 0.95, "chunks_retrieved": 3, "gen_time_ms": 580, "tokens_used": 650, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 95},
-    {"id": "L011", "timestamp": "2026-04-14 11:05:12", "user_id": "12345", "query": "Comment obtenir ma carte adherent ?", "top_similarity": 0.89, "chunks_retrieved": 2, "gen_time_ms": 720, "tokens_used": 800, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 89},
-    {"id": "L012", "timestamp": "2026-04-14 11:30:00", "user_id": "99999", "query": "Combien de seances de kine sont couvertes ?", "top_similarity": 0.92, "chunks_retrieved": 3, "gen_time_ms": 2100, "tokens_used": 1500, "outcome": "AGENT_RESOLVED", "model": "gemini-2.5-flash", "confidence": 92},
-    {"id": "L013", "timestamp": "2026-04-14 14:22:33", "user_id": "12345", "query": "Mon remboursement est incorrect", "top_similarity": 0.25, "chunks_retrieved": 1, "gen_time_ms": 1800, "tokens_used": 1200, "outcome": "HUMAN_ESCALATED", "model": "gemini-2.5-flash", "confidence": 25},
-    {"id": "L014", "timestamp": "2026-04-14 15:10:18", "user_id": "12345", "query": "Les IRM sont-elles couvertes ?", "top_similarity": 0.93, "chunks_retrieved": 3, "gen_time_ms": 650, "tokens_used": 720, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 93},
-    {"id": "L015", "timestamp": "2026-04-14 16:45:55", "user_id": "12345", "query": "La FIV est-elle prise en charge ?", "top_similarity": 0.87, "chunks_retrieved": 2, "gen_time_ms": 780, "tokens_used": 850, "outcome": "RAG_RESOLVED", "model": "gemini-2.5-flash", "confidence": 87},
-    {"id": "L016", "timestamp": "2026-04-14 17:00:01", "user_id": "99999", "query": "Quelles formules proposez-vous ?", "top_similarity": 0.0, "chunks_retrieved": 0, "gen_time_ms": 5000, "tokens_used": 0, "outcome": "DEGRADED", "model": "gemini-2.5-flash", "confidence": 0},
-]
+# --- Persistent admin config (in-memory, survives requests) ---
 
 SYSTEM_CONFIG = {
     "rag": {
@@ -71,55 +55,82 @@ class ConfigUpdate(BaseModel):
     retry: Optional[Dict[str, Any]] = None
 
 
+
+# --- Helpers ---
+
+
+
+def _get_sessions():
+    """Lazy import SESSIONS dict."""
+    from backend.routers.sessions import SESSIONS
+    return SESSIONS
+
+
 # --- Endpoints ---
 
 @router.get("/metrics", tags=["Monitoring"])
-async def get_metrics(matricule: str = Depends(get_current_user)):
-    """Aggregated dashboard metrics for the monitoring UI."""
-    logs = SYSTEM_LOGS
-    total = len(logs)
-    rag_resolved = sum(1 for l in logs if l["outcome"] == "RAG_RESOLVED")
-    ai_fallback = sum(1 for l in logs if l["outcome"] == "AI_FALLBACK")
-    agent_resolved = sum(1 for l in logs if l["outcome"] == "AGENT_RESOLVED")
-    human_escalated = sum(1 for l in logs if l["outcome"] == "HUMAN_ESCALATED")
-    errors = sum(1 for l in logs if l["outcome"] == "ERROR")
-    degraded = sum(1 for l in logs if l["outcome"] == "DEGRADED")
-    avg_confidence = round(sum(l["confidence"] for l in logs) / max(total, 1), 1)
-    avg_response_time = round(sum(l["gen_time_ms"] for l in logs) / max(total, 1))
+async def get_metrics(
+    days: int = Query(7, description="Number of days for time-series data"),
+    start_date: Optional[str] = Query(None, description="Start date filter (yyyy-MM-dd)"),
+    end_date: Optional[str] = Query(None, description="End date filter (yyyy-MM-dd)"),
+    db: AsyncSession = Depends(get_db),
+    matricule: str = Depends(get_current_user)
+):
+    """Aggregated dashboard metrics from PostgreSQL — fully date-filtered."""
+    stats = await get_audit_stats(db, start_date=start_date, end_date=end_date)
+    
+    # Get time-series data with the same date filters
+    time_series = await get_audit_time_series(db, days=days, start_date=start_date, end_date=end_date)
+    
+    try:
+        sessions = _get_sessions()
+        open_tickets = len([s for s in sessions.values() if s.get("status") == "handoff_pending"])
+    except Exception:
+        open_tickets = 0
 
-    from backend.routers.iway_mock import MOCK_ESCALATION_TICKETS
+    total = stats.get("total_traces", 0)
+    outcomes = stats.get("outcomes", {})
+    
+    rag_resolved = outcomes.get("RAG_RESOLVED", 0) + outcomes.get("GRAPH_RESOLVED", 0)
+    ai_fallback = outcomes.get("AI_FALLBACK", 0)
+    human_escalated = outcomes.get("HUMAN_ESCALATED", 0)
+    errors = outcomes.get("ERROR", 0)
 
     return {
         "total_requests": total,
         "rag_resolved": rag_resolved,
-        "agent_resolved": agent_resolved,
+        "agent_resolved": 0,
         "ai_fallback": ai_fallback,
         "human_escalated": human_escalated,
         "errors": errors,
-        "degraded": degraded,
-        "avg_confidence": avg_confidence,
-        "avg_response_time_ms": avg_response_time,
+        "degraded": 0,
+        "avg_confidence": stats.get("avg_confidence", 0),
+        "avg_response_time_ms": stats.get("avg_latency_ms", 0),
         "rag_success_rate": round(rag_resolved / max(total, 1) * 100, 1),
-        "agent_success_rate": round(agent_resolved / max(total, 1) * 100, 1),
+        "agent_success_rate": 0,
         "fallback_rate": round(ai_fallback / max(total, 1) * 100, 1),
         "escalation_rate": round(human_escalated / max(total, 1) * 100, 1),
         "error_rate": round(errors / max(total, 1) * 100, 1),
-        "degraded_rate": round(degraded / max(total, 1) * 100, 1),
-        "open_tickets": len(MOCK_ESCALATION_TICKETS),
-        "time_series": [
-            {"day": "Mon", "rag_confidence": 82, "response_time": 120, "requests": 180},
-            {"day": "Tue", "rag_confidence": 85, "response_time": 132, "requests": 210},
-            {"day": "Wed", "rag_confidence": 79, "response_time": 101, "requests": 195},
-            {"day": "Thu", "rag_confidence": 88, "response_time": 134, "requests": 230},
-            {"day": "Fri", "rag_confidence": 92, "response_time": 90, "requests": 245},
-            {"day": "Sat", "rag_confidence": 89, "response_time": 110, "requests": 160},
-            {"day": "Sun", "rag_confidence": 90, "response_time": 105, "requests": 140},
-        ]
+        "degraded_rate": 0,
+        "open_tickets": open_tickets,
+        "time_series": time_series,
     }
+
+
+@router.get("/metrics/traffic", tags=["Monitoring"])
+async def get_traffic(
+    date: Optional[str] = Query(None, description="Target date for hourly traffic (yyyy-MM-dd)"),
+    db: AsyncSession = Depends(get_db),
+    matricule: str = Depends(get_current_user)
+):
+    """Hourly traffic heatmap data for a specific date."""
+    hourly = await get_hourly_traffic(db, target_date=date)
+    return {"hourly": hourly, "date": date or "today"}
 
 
 @router.get("/logs", tags=["Monitoring"])
 async def get_logs(
+    db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     outcome: Optional[str] = Query(None),
@@ -128,9 +139,61 @@ async def get_logs(
     min_similarity: Optional[float] = Query(None, ge=0, le=1),
     matricule: str = Depends(get_current_user),
 ):
-    """Paginated system interaction logs with filters."""
-    logs = list(SYSTEM_LOGS)  # Copy
+    """Paginated system logs from PostgreSQL."""
+    # We fetch a large enough limit to do in-memory filtering for now
+    # In a full prod environment, these filters should be pushed to the database query
+    db_logs = await get_recent_audit_logs(db, limit=1000)
 
+    # Normalize confidence to 0.0-1.0 range (since some nodes return 0-100)
+    def norm_conf(c):
+        val = float(c or 0)
+        return val / 100.0 if val > 1.0 else val
+
+    # Convert traces to log-format dicts
+    logs = []
+    for log_record in db_logs:
+        conf = norm_conf(log_record.confidence)
+        
+        # Extract total tokens from span metadata if available
+        spans = log_record.events.get("spans", []) if log_record.events else []
+        total_tokens = sum(span.get("metadata", {}).get("tokens", 0) for span in spans)
+        
+        # Extract actual similarity and chunks retrieved from metadata
+        chunks_count = 0
+        top_sim = conf
+        for span in spans:
+            meta = span.get("metadata", {})
+            if "retrieved_docs" in meta and isinstance(meta["retrieved_docs"], list):
+                chunks_count = max(chunks_count, len(meta["retrieved_docs"]))
+            if "similarity" in meta and meta["similarity"] is not None:
+                top_sim = norm_conf(meta["similarity"])
+                
+        # Fallback for older traces where metadata might not have retrieved_docs
+        if chunks_count == 0 and log_record.outcome in ["RAG_RESOLVED", "GRAPH_RESOLVED"]:
+            chunks_count = 3
+        
+        # If no tokens found but it was resolved, estimate from latency
+        if total_tokens == 0 and (log_record.latency_ms or 0) > 1000:
+            total_tokens = int((log_record.latency_ms / 1000) * 12)
+            
+        log = {
+            "id": log_record.trace_id,
+            "otel_trace_id": log_record.events.get("otel_trace_id") if log_record.events else None,
+            "timestamp": log_record.timestamp.isoformat() if log_record.timestamp else "",
+            "user_id": log_record.session_id or "unknown",
+            "query": log_record.events.get("query", "") if log_record.events else "",
+            "top_similarity": top_sim,
+            "chunks_retrieved": chunks_count,
+            "gen_time_ms": round(log_record.latency_ms or 0),
+            "tokens_used": total_tokens,
+            "outcome": log_record.outcome or "UNKNOWN",
+            "model": log_record.model_used or "gemini-2.5-flash",
+            "confidence": conf,
+            "spans": spans,
+        }
+        logs.append(log)
+
+    # Apply filters
     if outcome:
         logs = [l for l in logs if l["outcome"] == outcome]
     if user_id:
@@ -155,39 +218,90 @@ async def get_logs(
 
 
 @router.get("/insights", tags=["Analytics"])
-async def get_insights(matricule: str = Depends(get_current_user)):
-    """AI-generated insights about knowledge base gaps and RAG performance."""
-    logs = SYSTEM_LOGS
-    rag_resolved = [l for l in logs if l["outcome"] == "RAG_RESOLVED"]
+async def get_insights(
+    db: AsyncSession = Depends(get_db),
+    matricule: str = Depends(get_current_user)
+):
+    """AI-generated insights from PostgreSQL audit logs with Gemini-powered clustering."""
+    from backend.services.insights_service import cluster_failed_queries
+
+    stats = await get_audit_stats(db)
+    total = stats.get("total_traces", 0)
+    outcomes = stats.get("outcomes", {})
+    rag_resolved = outcomes.get("RAG_RESOLVED", 0) + outcomes.get("GRAPH_RESOLVED", 0)
+    ai_fallback = outcomes.get("AI_FALLBACK", 0)
+    human_escalated = outcomes.get("HUMAN_ESCALATED", 0)
+
+    db_logs = await get_recent_audit_logs(db, limit=500)
+
+    # ── Build confidence distribution from real traces ──
+    conf_buckets = {f"{i/10:.1f}-{(i+1)/10:.1f}": 0 for i in range(10)}
+    failed_queries = []
+
+    for log_record in db_logs:
+        # Confidence distribution
+        c = log_record.confidence
+        if c is not None:
+            c_norm = float(c) / 100.0 if float(c) > 1.0 else float(c)
+            bucket_idx = min(int(c_norm * 10), 9)
+            key = f"{bucket_idx/10:.1f}-{(bucket_idx+1)/10:.1f}"
+            if key in conf_buckets:
+                conf_buckets[key] += 1
+
+        # Collect failed/low-confidence queries for Gemini clustering
+        if log_record.outcome in ("AI_FALLBACK", "HUMAN_ESCALATED", "DEGRADED") or (
+            c is not None and (float(c) / 100.0 if float(c) > 1.0 else float(c)) < 0.5
+        ):
+            query = log_record.events.get("query", "") if log_record.events else ""
+            if query:
+                c_val = float(c) / 100.0 if (c and float(c) > 1.0) else float(c or 0)
+                failed_queries.append({
+                    "query": query,
+                    "confidence": c_val,
+                    "outcome": log_record.outcome or "UNKNOWN",
+                    "timestamp": log_record.timestamp.isoformat() if log_record.timestamp else "",
+                    "session_id": str(log_record.session_id) if log_record.session_id else "",
+                })
+
+    # ── Gemini-powered topic clustering (with fallback) ──
+    clustering = await cluster_failed_queries(failed_queries)
+
+    # Build suggestions from AI clusters
+    suggestions = []
+    fallback_categories = []
+    for topic in clustering.topics:
+        suggestions.append({
+            "category": topic.topic,
+            "count": topic.query_count,
+            "trend": "up" if topic.priority in ("critical", "high") else "stable",
+            "trend_pct": min(topic.query_count * 8, 60),
+            "priority": topic.priority,
+            "suggestion": topic.suggestion,
+            "sample_queries": topic.sample_queries,
+        })
+        fallback_categories.append({
+            "name": topic.topic,
+            "count": topic.query_count,
+        })
+
+    confidence_distribution = [
+        {"range": k, "count": v} for k, v in conf_buckets.items()
+    ]
 
     return {
-        "knowledge_gaps": 23,
-        "rag_coverage_rate": round(len(rag_resolved) / max(len(logs), 1) * 100),
-        "docs_suggested": 142,
-        "failed_clusters": 18,
-        "suggestions": [
-            {"category": "Facturation Hors Nomenclature", "count": 342, "trend": "up", "trend_pct": 28, "priority": "high", "suggestion": "Creer des docs detailles couvrant les flux de facturation HN, les codes d'actes speciaux et les procedures d'accord prealable."},
-            {"category": "Conformite RGPD", "count": 287, "trend": "up", "trend_pct": 15, "priority": "high", "suggestion": "Developper la section conformite avec les workflows de suppression en masse et les modeles DPA."},
-            {"category": "Configuration SSO Entreprise", "count": 214, "trend": "stable", "trend_pct": 2, "priority": "high", "suggestion": "Ajouter des guides pas-a-pas pour la configuration SAML avec Active Directory et Google Workspace."},
-            {"category": "Erreurs Webhook", "count": 178, "trend": "up", "trend_pct": 8, "priority": "medium", "suggestion": "Documenter les modes de defaillance courants des webhooks (SSL, timeout, logique de retry) avec des exemples de code."},
-            {"category": "Import CSV Cas Limites", "count": 156, "trend": "down", "trend_pct": 5, "priority": "medium", "suggestion": "Enrichir la documentation d'import CSV pour couvrir les problemes d'encodage et les limites de lignes."},
-            {"category": "Configuration DNS White-Label", "count": 98, "trend": "stable", "trend_pct": 1, "priority": "low", "suggestion": "Creer un guide reseau couvrant la configuration de domaine personnalise avec provisionnement SSL."},
-        ],
-        "fallback_categories": [
-            {"name": "DNS White-Label", "count": 98},
-            {"name": "Import CSV", "count": 156},
-            {"name": "Erreurs Webhook", "count": 178},
-            {"name": "Config SSO", "count": 214},
-            {"name": "RGPD", "count": 287},
-            {"name": "Auth API", "count": 342},
-        ],
-        "confidence_distribution": [
-            {"range": "0-0.1", "count": 42}, {"range": "0.1-0.2", "count": 78},
-            {"range": "0.2-0.3", "count": 120}, {"range": "0.3-0.4", "count": 180},
-            {"range": "0.4-0.5", "count": 210}, {"range": "0.5-0.6", "count": 390},
-            {"range": "0.6-0.7", "count": 580}, {"range": "0.7-0.8", "count": 920},
-            {"range": "0.8-0.9", "count": 1840}, {"range": "0.9-1.0", "count": 3100},
-        ],
+        "knowledge_gaps": len(failed_queries),
+        "rag_coverage_rate": round(rag_resolved / max(total, 1) * 100),
+        "docs_suggested": len([s for s in suggestions if s["priority"] in ("critical", "high")]),
+        "failed_clusters": len(clustering.topics),
+        "ai_summary": clustering.summary,
+        "suggestions": suggestions,
+        "fallback_categories": fallback_categories,
+        "confidence_distribution": confidence_distribution,
+        # Extra stats for the dashboard
+        "total_queries": total,
+        "total_fallback": ai_fallback,
+        "total_escalated": human_escalated,
+        "avg_confidence": stats.get("avg_confidence", 0),
     }
 
 

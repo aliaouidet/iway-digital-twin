@@ -127,15 +127,13 @@ const ZERO4 = () => [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 
       <!-- ═══ TEXT ═══ -->
       <g clip-path="url(#hide-dot-clip-l)">
         <g class="text-mask">
-          <text x="32" y="105" class="iway-main-text"
-            [attr.fill]="dark() ? '#ffffff' : '#1a1a1a'">i-way</text>
+          <text x="32" y="105" class="iway-main-text fill-[#1a1a1a] dark:fill-white">i-way</text>
         </g>
       </g>
 
       <!-- Subtitle -->
       <g class="sub-text-intro">
-        <text x="52" y="121" class="iway-sub-text"
-          [attr.fill]="dark() ? '#94a3b8' : '#64748b'">Intelligence Way</text>
+        <text x="52" y="121" class="iway-sub-text fill-slate-500 dark:fill-slate-400">Intelligence Way</text>
       </g>
     </svg>
   `,

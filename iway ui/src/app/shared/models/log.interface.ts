@@ -1,7 +1,8 @@
-export type LogOutcome = 'RAG_RESOLVED' | 'AI_FALLBACK' | 'HUMAN_ESCALATED' | 'ERROR';
+export type LogOutcome = 'RAG_RESOLVED' | 'GRAPH_RESOLVED' | 'STALL_RESOLVED' | 'AI_FALLBACK' | 'HUMAN_ESCALATED' | 'ERROR' | string;
 
 export interface LogEntry {
   id: string;
+  otel_trace_id?: string;
   timestamp: string;
   user_id: string;
   query: string;

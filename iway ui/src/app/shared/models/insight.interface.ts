@@ -3,8 +3,9 @@ export interface InsightSuggestion {
   count: number;
   trend: 'up' | 'down' | 'stable';
   trend_pct: number;
-  priority: 'high' | 'medium' | 'low';
+  priority: 'critical' | 'high' | 'medium' | 'low';
   suggestion: string;
+  sample_queries?: string[];
 }
 
 export interface FallbackCategory {
@@ -22,7 +23,13 @@ export interface InsightsData {
   rag_coverage_rate: number;
   docs_suggested: number;
   failed_clusters: number;
+  ai_summary?: string;
   suggestions: InsightSuggestion[];
   fallback_categories: FallbackCategory[];
   confidence_distribution: ConfidenceBucket[];
+  // Extra stats
+  total_queries?: number;
+  total_fallback?: number;
+  total_escalated?: number;
+  avg_confidence?: number;
 }

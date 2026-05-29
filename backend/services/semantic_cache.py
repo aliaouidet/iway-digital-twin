@@ -13,15 +13,15 @@ from redisvl.index import SearchIndex
 from redisvl.schema import IndexSchema
 from redisvl.query import VectorQuery
 
-from backend.database.connection import get_embedding_model
+from backend.services.rag_service import embed_text
 
 logger = logging.getLogger("I-Way-Twin")
 
 # Define RedisVL Schema
 schema = IndexSchema.from_dict({
     "index": {
-        "name": "iway_semantic_cache",
-        "prefix": "cache:",
+        "name": "iway_semantic_cache_v4",
+        "prefix": "cache_v4:",
         "storage_type": "hash"
     },
     "fields": [
@@ -68,8 +68,8 @@ async def check_semantic_cache(query: str, similarity_threshold: float = 0.95) -
 
     try:
         # Generate embedding for the query
-        embedder = get_embedding_model()
-        vector = await embedder.aembed_query(query)
+        # Generate embedding for the query
+        vector = embed_text(query)
 
         # Build vector query
         v_query = VectorQuery(
@@ -104,13 +104,15 @@ async def store_semantic_cache(query: str, response: str):
         return
 
     try:
-        embedder = get_embedding_model()
-        vector = await embedder.aembed_query(query)
+        vector = embed_text(query)
+        
+        import numpy as np
+        vector_bytes = np.array(vector, dtype=np.float32).tobytes()
         
         data = {
             "query": query,
             "response": response,
-            "query_vector": vector
+            "query_vector": vector_bytes
         }
         
         index.load([data])
@@ -133,8 +135,7 @@ async def invalidate_semantic_cache(query: str):
         
         # We need to find the exact query and delete it.
         # Since we didn't tag the query, we can just do a vector search with score 1.0 and delete the key.
-        embedder = get_embedding_model()
-        vector = await embedder.aembed_query(query)
+        vector = embed_text(query)
         v_query = VectorQuery(
             vector=vector,
             vector_field_name="query_vector",

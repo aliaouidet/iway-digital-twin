@@ -1,8 +1,11 @@
 export interface TimeSeriesPoint {
   day: string;
+  date?: string;
   rag_confidence: number;
   response_time: number;
   requests: number;
+  total_traces: number;
+  total_tokens?: number;
 }
 
 export interface DashboardMetrics {

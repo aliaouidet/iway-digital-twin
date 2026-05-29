@@ -26,6 +26,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install -r requirements.txt
 
+# Pre-download the embedding model so it's baked into the image
+RUN python -c "\
+from sentence_transformers import SentenceTransformer;\
+SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')\
+"
+
 # ==============================================================================
 # STAGE 2: Runtime
 # ==============================================================================

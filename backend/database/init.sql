@@ -127,6 +127,7 @@ CREATE TABLE audit_log (
     latency_ms      INTEGER,
     model_used      VARCHAR(50),
     confidence      FLOAT,
+    tokens_used     INTEGER DEFAULT 0,
     events          JSONB,
     timestamp       TIMESTAMPTZ DEFAULT NOW()
 );

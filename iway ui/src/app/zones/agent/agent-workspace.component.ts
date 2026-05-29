@@ -51,56 +51,51 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
     ])
   ],
   template: `
-    <div class="h-screen flex transition-colors duration-300 relative overflow-hidden"
-      [class]="isDark() ? 'bg-[#020617]' : 'bg-slate-50'">
+    <div class="h-screen flex transition-colors duration-300 relative overflow-hidden bg-slate-50 dark:bg-[#020617]">
 
       <!-- Mobile Backdrop -->
       <div *ngIf="isSidebarOpen()" (click)="toggleSidebar()"
            class="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity duration-300"></div>
 
       <!-- Left Panel: Escalation Queue -->
-      <aside class="w-80 flex flex-col border-r flex-shrink-0 transition-transform duration-300 ease-in-out absolute md:relative z-50 h-full shadow-2xl md:shadow-none"
+      <aside class="w-80 flex flex-col border-r flex-shrink-0 transition-transform duration-300 ease-in-out absolute md:relative z-50 h-full shadow-2xl md:shadow-none bg-white border-slate-200 dark:bg-[#0F172A] dark:border-slate-800"
         [class.translate-x-0]="isSidebarOpen()"
-        [class.-translate-x-full]="!isSidebarOpen() && !isDesktopMode"
-        [class]="isDark() ? 'bg-[#0F172A] border-slate-800' : 'bg-white border-slate-200'">
+        [class.-translate-x-full]="!isSidebarOpen() && !isDesktopMode">
         <!-- Header -->
-        <div class="h-14 flex items-center justify-between px-4 border-b flex-shrink-0"
-          [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
+        <div class="h-14 flex items-center justify-between px-4 border-b flex-shrink-0 border-slate-200 dark:border-slate-800">
           <div class="flex items-center gap-2">
             <div style="width: 110px;">
-              <app-iway-logo [dark]="isDark()" width="100%"></app-iway-logo>
+              <app-iway-logo width="100%"></app-iway-logo>
             </div>
           </div>
           <div class="flex items-center gap-1">
-            <button (click)="toggleSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer mr-1"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-500'">
+            <button (click)="toggleSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer mr-1 hover:bg-slate-100 text-slate-500 dark:hover:bg-slate-800 dark:text-slate-400">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
-            <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-500' : 'hover:bg-slate-100 text-slate-400'">
-              <svg *ngIf="isDark()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
-              <svg *ngIf="!isDark()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+            <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
+              <!-- Sun icon for dark mode (to switch to light) -->
+              <svg class="w-3.5 h-3.5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
+              <!-- Moon icon for light mode (to switch to dark) -->
+              <svg class="w-3.5 h-3.5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
             </button>
-            <button (click)="logout()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
-              [class]="isDark() ? 'hover:bg-slate-800 text-slate-500 hover:text-rose-400' : 'hover:bg-slate-100 text-slate-400 hover:text-rose-500'">
+            <button (click)="logout()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
             </button>
           </div>
         </div>
 
         <!-- Filter Tabs -->
-        <div class="px-3 py-2.5 flex gap-1 border-b"
-          [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
+        <div class="px-3 py-2.5 flex gap-1 border-b border-slate-200 dark:border-slate-800">
           <button *ngFor="let f of filterOptions" (click)="setFilter(f.key)"
             class="flex-1 px-2 py-1.5 rounded-lg text-[10px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-1"
             [class]="currentFilter() === f.key
-              ? (isDark() ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30' : 'bg-indigo-50 text-indigo-600 border border-indigo-200')
-              : (isDark() ? 'text-slate-500 hover:bg-slate-800/50 border border-transparent' : 'text-slate-400 hover:bg-slate-50 border border-transparent')">
+              ? 'bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30'
+              : 'text-slate-400 hover:bg-slate-50 border border-transparent dark:text-slate-500 dark:hover:bg-slate-800/50'">
             {{f.label}}
             <span *ngIf="getFilterCount(f.key) > 0" class="px-1 py-0 rounded text-[8px] font-bold"
               [class]="currentFilter() === f.key
-                ? (isDark() ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700')
-                : (isDark() ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500')">
+                ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300'
+                : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'">
               {{getFilterCount(f.key)}}
             </span>
           </button>
@@ -109,30 +104,28 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
         <!-- Search -->
         <div class="px-3 py-2">
           <input [(ngModel)]="searchQuery" placeholder="Rechercher par nom ou raison..."
-            class="w-full px-3 py-2 rounded-lg text-[11px] transition-all focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-            [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400'" />
+            class="w-full px-3 py-2 rounded-lg text-[11px] transition-all focus:outline-none focus:ring-1 focus:ring-indigo-500/50 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
         </div>
 
         <!-- Queue Items -->
         <div class="flex-1 overflow-y-auto px-3 space-y-1.5 custom-scrollbar">
           <div *ngIf="filteredQueue().length === 0 && !queueLoading()" class="text-center py-10">
-            <svg class="w-8 h-8 mx-auto mb-2" [class]="isDark() ? 'text-slate-700' : 'text-slate-300'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
-            <p class="text-[11px]" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">Aucune escalation</p>
+            <svg class="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+            <p class="text-[11px] text-slate-400 dark:text-slate-600">Aucune escalation</p>
           </div>
 
           <!-- Skeleton loader -->
           <div *ngIf="queueLoading()" class="space-y-2">
-            <div *ngFor="let s of [1,2,3]" class="p-3 rounded-xl border animate-pulse"
-              [class]="isDark() ? 'bg-slate-800/30 border-slate-700/50' : 'bg-slate-50 border-slate-200'">
+            <div *ngFor="let s of [1,2,3]" class="p-3 rounded-xl border animate-pulse bg-slate-50 border-slate-200 dark:bg-slate-800/30 dark:border-slate-700/50">
               <div class="flex items-center gap-2 mb-2">
-                <div class="w-2 h-2 rounded-full" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
-                <div class="h-3 rounded w-24" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
-                <div class="ml-auto h-3 rounded w-12" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
+                <div class="w-2 h-2 rounded-full bg-slate-200 dark:bg-slate-700"></div>
+                <div class="h-3 rounded w-24 bg-slate-200 dark:bg-slate-700"></div>
+                <div class="ml-auto h-3 rounded w-12 bg-slate-200 dark:bg-slate-700"></div>
               </div>
-              <div class="h-2.5 rounded w-full mb-1.5" [class]="isDark() ? 'bg-slate-700/60' : 'bg-slate-100'"></div>
+              <div class="h-2.5 rounded w-full mb-1.5 bg-slate-100 dark:bg-slate-700/60"></div>
               <div class="flex justify-between">
-                <div class="h-2 rounded w-10" [class]="isDark() ? 'bg-slate-700/40' : 'bg-slate-100'"></div>
-                <div class="h-2 rounded w-14" [class]="isDark() ? 'bg-slate-700/40' : 'bg-slate-100'"></div>
+                <div class="h-2 rounded w-10 bg-slate-100 dark:bg-slate-700/40"></div>
+                <div class="h-2 rounded w-14 bg-slate-100 dark:bg-slate-700/40"></div>
               </div>
             </div>
           </div>
@@ -144,22 +137,22 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               <div class="flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full flex-shrink-0"
                   [class]="item.status === 'handoff_pending' ? 'bg-rose-500 animate-pulse' : item.status === 'agent_connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                <span class="text-xs font-semibold" [class]="isDark() ? 'text-white' : 'text-slate-900'">{{item.user_name}}</span>
+                <span class="text-xs font-semibold text-slate-900 dark:text-white">{{item.user_name}}</span>
               </div>
               <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
                 [class]="getStatusBadge(item.status)">{{getStatusLabel(item.status)}}</span>
             </div>
-            <p class="text-[10px] truncate mb-1" [class]="isDark() ? 'text-slate-500' : 'text-slate-500'">
+            <p class="text-[10px] truncate mb-1 text-slate-500 dark:text-slate-500">
               {{item.reason || item.last_message || 'Pas de messages'}}
             </p>
             <div class="flex items-center justify-between">
-              <span class="text-[9px]" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">{{item.message_count}} msgs</span>
+              <span class="text-[9px] text-slate-400 dark:text-slate-600">{{item.message_count}} msgs</span>
               <div class="flex items-center gap-2">
                 <span *ngIf="item.last_ai_confidence !== null" class="text-[9px] px-1.5 py-0.5 rounded"
                   [class]="getConfidenceClass(item.last_ai_confidence)">
                   {{item.last_ai_confidence}}%
                 </span>
-                <span class="text-[9px]" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">{{formatTime(item.created_at)}}</span>
+                <span class="text-[9px] text-slate-400 dark:text-slate-600">{{formatTime(item.created_at)}}</span>
               </div>
             </div>
           </button>
@@ -169,33 +162,30 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
       <!-- Right Panel -->
       <main class="flex-1 flex flex-col min-w-0 relative h-full">
         <!-- Mobile Header (when no active session) -->
-        <header *ngIf="!activeSession()" class="md:hidden h-14 flex items-center px-4 border-b flex-shrink-0" [class]="isDark() ? 'bg-[#0F172A]/80 border-slate-800' : 'bg-white border-slate-200'">
-          <button (click)="toggleSidebar()" class="p-2 -ml-2 rounded-lg transition-colors cursor-pointer" [class]="isDark() ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'" aria-label="Ouvrir la file d'attente">
+        <header *ngIf="!activeSession()" class="md:hidden h-14 flex items-center px-4 border-b flex-shrink-0 bg-white border-slate-200 dark:bg-[#0F172A]/80 dark:border-slate-800">
+          <button (click)="toggleSidebar()" class="p-2 -ml-2 rounded-lg transition-colors cursor-pointer hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300" aria-label="Ouvrir la file d'attente">
             <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
-          <span class="ml-2 text-sm font-semibold" [class]="isDark() ? 'text-slate-200' : 'text-slate-800'">File d'attente</span>
+          <span class="ml-2 text-sm font-semibold text-slate-800 dark:text-slate-200">File d'attente</span>
         </header>
 
         <!-- Empty State -->
         <div *ngIf="!activeSession()" class="flex-1 flex items-center justify-center">
           <div class="text-center">
-            <div class="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4"
-              [class]="isDark() ? 'bg-slate-800/50' : 'bg-slate-100'">
-              <svg class="w-8 h-8" [class]="isDark() ? 'text-slate-700' : 'text-slate-300'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155"/></svg>
+            <div class="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 bg-slate-100 dark:bg-slate-800/50">
+              <svg class="w-8 h-8 text-slate-300 dark:text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155"/></svg>
             </div>
-            <h3 class="text-base font-bold mb-1" style="font-family: 'Figtree', sans-serif;"
-              [class]="isDark() ? 'text-slate-400' : 'text-slate-600'">Sélectionnez un cas</h3>
-            <p class="text-xs" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">Cliquez sur une escalation pour voir la conversation.</p>
+            <h3 class="text-base font-bold mb-1 text-slate-600 dark:text-slate-400" style="font-family: 'Figtree', sans-serif;">Sélectionnez un cas</h3>
+            <p class="text-xs text-slate-400 dark:text-slate-600">Cliquez sur une escalation pour voir la conversation.</p>
           </div>
         </div>
 
         <!-- Active Session -->
         <ng-container *ngIf="activeSession()">
           <!-- Session Header -->
-          <header class="h-14 flex items-center justify-between px-3 md:px-5 border-b flex-shrink-0"
-            [class]="isDark() ? 'bg-[#0F172A]/60 border-slate-800' : 'bg-white border-slate-200'">
+          <header class="h-14 flex items-center justify-between px-3 md:px-5 border-b flex-shrink-0 bg-white border-slate-200 dark:bg-[#0F172A]/60 dark:border-slate-800">
             <div class="flex items-center gap-2 md:gap-3 min-w-0">
-              <button (click)="toggleSidebar()" class="md:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0" [class]="isDark() ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'" aria-label="Ouvrir la file d'attente">
+              <button (click)="toggleSidebar()" class="md:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0 hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300" aria-label="Ouvrir la file d'attente">
                 <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
               </button>
               <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
@@ -203,15 +193,15 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 {{getInitials(activeSession()!.user_name)}}
               </div>
               <div>
-                <div class="text-sm font-semibold" [class]="isDark() ? 'text-white' : 'text-slate-900'">{{activeSession()!.user_name}}</div>
-                <div class="text-[10px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">{{activeSession()!.user_role}} · {{activeSession()!.user_matricule}}</div>
+                <div class="text-sm font-semibold text-slate-900 dark:text-white">{{activeSession()!.user_name}}</div>
+                <div class="text-[10px] text-slate-400 dark:text-slate-500">{{activeSession()!.user_role}} · {{activeSession()!.user_matricule}}</div>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <button (click)="toggleBriefing()" class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
                 [class]="showBriefing()
-                  ? (isDark() ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30' : 'bg-indigo-50 text-indigo-600 border border-indigo-200')
-                  : (isDark() ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')">
+                  ? 'bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
                 Briefing
               </button>
@@ -223,28 +213,25 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               <button *ngIf="hasTakenOver()" (click)="showResolveDialog.set(true)"
                 class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                Résoudre
+                Résolu
               </button>
             </div>
           </header>
 
           <!-- Resolve Dialog (inline panel) -->
-          <div *ngIf="showResolveDialog()" class="border-b overflow-hidden transition-all"
-            [class]="isDark() ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'">
+          <div *ngIf="showResolveDialog()" class="border-b overflow-hidden transition-all bg-emerald-50 border-emerald-200 dark:bg-emerald-500/5 dark:border-emerald-500/20">
             <div class="px-5 py-4">
               <div class="flex items-center gap-2 mb-3">
-                <svg class="w-4 h-4" [class]="isDark() ? 'text-emerald-400' : 'text-emerald-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <span class="text-xs font-bold" [class]="isDark() ? 'text-emerald-300' : 'text-emerald-800'">Résoudre cette session</span>
+                <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="text-xs font-bold text-emerald-800 dark:text-emerald-300">Résoudre cette session</span>
               </div>
               <label class="flex items-center gap-2 mb-3 cursor-pointer">
-                <input type="checkbox" [(ngModel)]="saveToKnowledge" class="w-3.5 h-3.5 rounded border accent-emerald-500 cursor-pointer"
-                  [class]="isDark() ? 'border-slate-600' : 'border-slate-300'" />
-                <span class="text-[11px] font-medium" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">Sauvegarder dans la base de connaissances (HITL)</span>
+                <input type="checkbox" [(ngModel)]="saveToKnowledge" class="w-3.5 h-3.5 rounded border accent-emerald-500 cursor-pointer border-slate-300 dark:border-slate-600" />
+                <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300">Sauvegarder dans la base de connaissances (HITL)</span>
               </label>
               <div *ngIf="saveToKnowledge" class="mb-3">
                 <input [(ngModel)]="resolveTags" placeholder="Tags (séparés par virgule, ex: dentaire, remboursement)"
-                  class="w-full px-3 py-2 rounded-lg text-[11px] transition-all focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                  [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400'" />
+                  class="w-full px-3 py-2 rounded-lg text-[11px] transition-all focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-white border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
               </div>
               <div class="flex items-center gap-2">
                 <button (click)="resolveSession()"
@@ -253,26 +240,104 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   Confirmer
                 </button>
                 <button (click)="showResolveDialog.set(false)"
-                  class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-slate-500/50"
-                  [class]="isDark() ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'">
+                  class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-slate-500/50 bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:border-transparent">
                   Annuler
                 </button>
               </div>
             </div>
           </div>
 
+          <!-- Knowledge Extraction Modal -->
+          <div *ngIf="showKnowledgeModal()" class="border-b overflow-hidden transition-all bg-indigo-50 border-indigo-200 dark:bg-indigo-500/5 dark:border-indigo-500/20">
+            <div class="px-5 py-4">
+              <div class="flex items-center gap-2 mb-3">
+                <svg class="w-4 h-4 text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
+                <span class="text-xs font-bold text-indigo-800 dark:text-indigo-300">Connaissances extraites de cette session</span>
+              </div>
+
+              <!-- Loading -->
+              <div *ngIf="extractionLoading()" class="flex items-center gap-2 py-4">
+                <div class="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                <span class="text-xs text-indigo-600 dark:text-indigo-400">Analyse de la conversation en cours...</span>
+              </div>
+
+              <!-- Empty result -->
+              <div *ngIf="!extractionLoading() && extractedPairs().length === 0" class="py-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400">Aucune connaissance utile identifiée dans cette conversation.</p>
+                <button (click)="showKnowledgeModal.set(false)" class="mt-2 px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:border-transparent">Fermer</button>
+              </div>
+
+              <!-- Extracted pairs -->
+              <div *ngIf="!extractionLoading() && extractedPairs().length > 0" class="space-y-3">
+                <!-- Saveable pairs -->
+                <ng-container *ngFor="let pair of extractedPairs(); let i = index">
+                  <!-- General or Procedural -->
+                  <div *ngIf="pair.knowledge_type !== 'personal'" class="rounded-xl p-3 border transition-all"
+                    [class]="pair.selected
+                      ? 'bg-white border-indigo-300 dark:bg-slate-800/50 dark:border-indigo-500/30'
+                      : 'bg-slate-50 border-slate-200 dark:bg-slate-800/20 dark:border-slate-700 opacity-60'">
+                    <div class="flex items-center justify-between mb-2">
+                      <div class="flex items-center gap-1.5">
+                        <input type="checkbox" [(ngModel)]="pair.selected" class="w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer" />
+                        <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                          [class]="pair.knowledge_type === 'general'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">
+                          {{pair.knowledge_type === 'general' ? '🟢 Générale' : '🟡 Procédurale'}}
+                        </span>
+                        <span class="px-1.5 py-0.5 rounded text-[8px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{pair.topic}}</span>
+                      </div>
+                    </div>
+                    <div class="space-y-1.5">
+                      <div>
+                        <label class="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Question</label>
+                        <input [(ngModel)]="pair.question" class="w-full px-2.5 py-1.5 mt-0.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 bg-white border border-slate-200 text-slate-900 dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+                      </div>
+                      <div>
+                        <label class="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Réponse</label>
+                        <textarea [(ngModel)]="pair.answer" rows="2" class="w-full px-2.5 py-1.5 mt-0.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none bg-white border border-slate-200 text-slate-900 dark:bg-slate-800 dark:border-slate-700 dark:text-white"></textarea>
+                      </div>
+                    </div>
+                    <p class="text-[9px] mt-1.5 italic text-slate-400 dark:text-slate-500">{{pair.reason}}</p>
+                  </div>
+
+                  <!-- Personal (blocked) -->
+                  <div *ngIf="pair.knowledge_type === 'personal'" class="rounded-xl p-3 border border-rose-200 bg-rose-50/50 dark:bg-rose-500/5 dark:border-rose-500/20">
+                    <div class="flex items-center gap-1.5 mb-1.5">
+                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400">🔴 Donnée personnelle</span>
+                      <span class="px-1.5 py-0.5 rounded text-[8px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{pair.topic}}</span>
+                    </div>
+                    <p class="text-[10px] text-rose-700 dark:text-rose-300">{{pair.answer}}</p>
+                    <p class="text-[9px] mt-1 italic text-rose-500/70 dark:text-rose-400/50">ℹ️ {{pair.reason}} — Non sauvegardable.</p>
+                  </div>
+                </ng-container>
+
+                <!-- Action buttons -->
+                <div class="flex items-center gap-2 pt-1">
+                  <button (click)="saveExtractedKnowledge()" [disabled]="savingKnowledge()"
+                    class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+                    <svg *ngIf="!savingKnowledge()" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                    <div *ngIf="savingKnowledge()" class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Sauvegarder ({{getSelectedPairCount()}} paire{{getSelectedPairCount() > 1 ? 's' : ''}})
+                  </button>
+                  <button (click)="showKnowledgeModal.set(false)"
+                    class="px-4 py-2 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:border-transparent">Annuler</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Briefing Panel (collapsible) -->
-          <div *ngIf="showBriefing() && briefing()" class="border-b overflow-hidden transition-all"
-            [class]="isDark() ? 'bg-[#0F172A]/40 border-slate-800' : 'bg-slate-50 border-slate-200'">
+          <div *ngIf="showBriefing() && briefing()" class="border-b overflow-hidden transition-all bg-slate-50 border-slate-200 dark:bg-[#0F172A]/40 dark:border-slate-800">
             <div class="px-5 py-4">
               <!-- Client Info + Stats Row -->
               <div class="flex items-start gap-4 mb-3">
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-2">
-                    <span class="text-[10px] font-bold uppercase tracking-wider" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Résumé IA</span>
-                    <span *ngIf="briefingLoading()" class="text-[9px] animate-pulse" [class]="isDark() ? 'text-indigo-400' : 'text-indigo-500'">Chargement...</span>
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Résumé IA</span>
+                    <span *ngIf="briefingLoading()" class="text-[9px] animate-pulse text-indigo-500 dark:text-indigo-400">Chargement...</span>
                   </div>
-                  <p class="text-xs leading-relaxed" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">
+                  <p class="text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                     {{briefing()!.ai_summary}}
                   </p>
                 </div>
@@ -280,14 +345,14 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   <app-confidence-gauge *ngIf="briefing()!.last_ai_confidence !== null"
                     [value]="briefing()!.last_ai_confidence!" [size]="72" [strokeWidth]="5"></app-confidence-gauge>
                   <div class="flex items-center gap-1.5">
-                    <span class="text-[9px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Durée</span>
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold" [class]="isDark() ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-700'">
+                    <span class="text-[9px] text-slate-400 dark:text-slate-500">Durée</span>
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {{briefing()!.duration_minutes}} min
                     </span>
                   </div>
                   <div class="flex items-center gap-1.5">
-                    <span class="text-[9px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Messages</span>
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold" [class]="isDark() ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-700'">
+                    <span class="text-[9px] text-slate-400 dark:text-slate-500">Messages</span>
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {{briefing()!.message_count}}
                     </span>
                   </div>
@@ -296,22 +361,20 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
               <!-- Topics -->
               <div *ngIf="briefing()!.topics.length > 0" class="flex items-center gap-1.5 mb-3">
-                <span class="text-[9px] font-semibold" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Sujets:</span>
-                <span *ngFor="let topic of briefing()!.topics" class="px-2 py-0.5 rounded-full text-[9px] font-medium"
-                  [class]="isDark() ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border border-indigo-200'">
+                <span class="text-[9px] font-semibold text-slate-400 dark:text-slate-500">Sujets:</span>
+                <span *ngFor="let topic of briefing()!.topics" class="px-2 py-0.5 rounded-full text-[9px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
                   {{topic}}
                 </span>
               </div>
 
               <!-- Trigger Message (AI response that caused escalation) -->
-              <div *ngIf="briefing()!.trigger_message" class="rounded-xl p-3 border"
-                [class]="isDark() ? 'bg-rose-500/5 border-rose-500/20' : 'bg-rose-50 border-rose-200'">
+              <div *ngIf="briefing()!.trigger_message" class="rounded-xl p-3 border bg-rose-50 border-rose-200 dark:bg-rose-500/5 dark:border-rose-500/20">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-[9px] font-bold uppercase tracking-wider" [class]="isDark() ? 'text-rose-400' : 'text-rose-600'">
+                  <span class="text-[9px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
                     Réponse IA ayant déclenché l'escalade ({{briefing()!.trigger_message!.confidence}}%)
                   </span>
                 </div>
-                <p class="text-xs mb-3" [class]="isDark() ? 'text-rose-200/80' : 'text-rose-800'">
+                <p class="text-xs mb-3 text-rose-800 dark:text-rose-200/80">
                   "{{briefing()!.trigger_message!.content}}"
                 </p>
                 <div class="flex items-center gap-2">
@@ -320,8 +383,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     Approuver et envoyer
                   </button>
                   <button (click)="showClarifyInput.set(true)" *ngIf="!showClarifyInput()"
-                    class="px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1"
-                    [class]="isDark() ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'">
+                    class="px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1 bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:border-transparent">
                     <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/></svg>
                     Clarifier
                   </button>
@@ -329,8 +391,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <!-- Clarify Input -->
                 <div *ngIf="showClarifyInput()" class="mt-2 flex gap-2">
                   <input [(ngModel)]="clarifyText" placeholder="Ajoutez votre précision..."
-                    class="flex-1 px-3 py-2 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-500/50"
-                    [class]="isDark() ? 'bg-slate-800 border border-slate-700 text-white placeholder-slate-500' : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400'" />
+                    class="flex-1 px-3 py-2 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-500/50 bg-white border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
                   <button (click)="clarifyAiResponse()" [disabled]="!clarifyText.trim()"
                     class="px-3 py-2 rounded-lg text-[10px] font-semibold cursor-pointer bg-amber-500 hover:bg-amber-400 text-white disabled:opacity-50">
                     Envoyer
@@ -339,22 +400,21 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               </div>
 
               <!-- Session Timeline -->
-              <div class="mt-4 pt-3 border-t" [class]="isDark() ? 'border-slate-800' : 'border-slate-200'">
+              <div class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <div class="flex items-center gap-1.5 mb-3">
-                  <svg class="w-3 h-3" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <span class="text-[9px] font-bold uppercase tracking-wider" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">Chronologie</span>
+                  <svg class="w-3 h-3 text-slate-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Chronologie</span>
                 </div>
                 <div class="relative pl-4">
                   <!-- Vertical line -->
-                  <div class="absolute left-[5px] top-1 bottom-1 w-px" [class]="isDark() ? 'bg-slate-700' : 'bg-slate-200'"></div>
+                  <div class="absolute left-[5px] top-1 bottom-1 w-px bg-slate-200 dark:bg-slate-700"></div>
 
                   <!-- Event: Chat started -->
                   <div class="relative flex items-start gap-2.5 mb-3">
-                    <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0"
-                      [class]="isDark() ? 'bg-indigo-500 border-indigo-400' : 'bg-indigo-500 border-indigo-300'"></div>
+                    <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-indigo-500 border-indigo-300 dark:border-indigo-400"></div>
                     <div>
-                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">Chat démarré</span>
-                      <span class="text-[9px] ml-1" [class]="isDark() ? 'text-slate-600' : 'text-slate-400'">par {{briefing()!.client.name}}</span>
+                      <span class="text-[10px] font-medium text-slate-700 dark:text-slate-300">Chat démarré</span>
+                      <span class="text-[9px] ml-1 text-slate-400 dark:text-slate-600">par {{briefing()!.client.name}}</span>
                     </div>
                   </div>
 
@@ -363,7 +423,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0"
                       [class]="evt.confidence >= 70 ? 'bg-emerald-500 border-emerald-400' : evt.confidence >= 40 ? 'bg-amber-500 border-amber-400' : 'bg-rose-500 border-rose-400'"></div>
                     <div>
-                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-slate-300' : 'text-slate-700'">IA a répondu</span>
+                      <span class="text-[10px] font-medium text-slate-700 dark:text-slate-300">IA a répondu</span>
                       <span class="text-[10px] font-bold ml-1"
                         [class]="evt.confidence >= 70 ? 'text-emerald-400' : evt.confidence >= 40 ? 'text-amber-400' : 'text-rose-400'">({{evt.confidence}}%)</span>
                     </div>
@@ -373,8 +433,8 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   <div *ngIf="briefing()!.escalation_reason" class="relative flex items-start gap-2.5 mb-3">
                     <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-rose-500 border-rose-400"></div>
                     <div>
-                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-rose-300' : 'text-rose-700'">Handoff déclenché</span>
-                      <p class="text-[9px] mt-0.5 truncate max-w-[200px]" [class]="isDark() ? 'text-slate-500' : 'text-slate-400'">{{briefing()!.escalation_reason}}</p>
+                      <span class="text-[10px] font-medium text-rose-700 dark:text-rose-300">Handoff déclenché</span>
+                      <p class="text-[9px] mt-0.5 truncate max-w-[200px] text-slate-400 dark:text-slate-500">{{briefing()!.escalation_reason}}</p>
                     </div>
                   </div>
 
@@ -382,7 +442,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   <div *ngIf="briefing()!.status === 'agent_connected'" class="relative flex items-start gap-2.5">
                     <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-emerald-500 border-emerald-400"></div>
                     <div>
-                      <span class="text-[10px] font-medium" [class]="isDark() ? 'text-emerald-300' : 'text-emerald-700'">Agent connecté</span>
+                      <span class="text-[10px] font-medium text-emerald-700 dark:text-emerald-300">Agent connecté</span>
                     </div>
                   </div>
                 </div>
@@ -396,13 +456,12 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               <!-- System -->
               <div *ngSwitchCase="'system'" class="flex justify-center">
                 <span class="px-3 py-1.5 rounded-full text-[10px] font-medium"
-                  [class]="isDark() ? 'bg-slate-800/50 text-slate-500' : 'bg-slate-100 text-slate-500'">{{msg.content}}</span>
+                  class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500">{{msg.content}}</span>
               </div>
               <!-- User -->
               <div *ngSwitchCase="'user'" class="flex justify-start gap-2">
                 <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-1 text-[9px] font-bold text-white" style="background: #6366f1;">U</div>
-                <div class="max-w-[70%] px-3 py-2.5 rounded-xl rounded-bl-md text-sm"
-                  [class]="isDark() ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-200' : 'bg-indigo-50 border border-indigo-100 text-indigo-900'">
+                <div class="max-w-[70%] px-3 py-2.5 rounded-xl rounded-bl-md text-sm bg-indigo-50 border border-indigo-100 text-indigo-900 dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:text-indigo-200">
                   {{msg.content}}
                 </div>
               </div>
@@ -410,21 +469,20 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               <div *ngSwitchCase="'assistant'" class="flex justify-start gap-2">
                 <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-1"
                   [class]="msg.is_handoff_ai
-                    ? (isDark() ? 'bg-orange-500/10' : 'bg-orange-100')
-                    : (isDark() ? 'bg-slate-800' : 'bg-slate-200')">
-                  <svg *ngIf="msg.is_handoff_ai" class="w-3 h-3" [class]="isDark() ? 'text-orange-400' : 'text-orange-600'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <svg *ngIf="!msg.is_handoff_ai" class="w-3 h-3" [class]="isDark() ? 'text-slate-400' : 'text-slate-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                    ? 'bg-orange-100 dark:bg-orange-500/10'
+                    : 'bg-slate-200 dark:bg-slate-800'">
+                  <svg *ngIf="msg.is_handoff_ai" class="w-3 h-3 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <svg *ngIf="!msg.is_handoff_ai" class="w-3 h-3 text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
                 </div>
                 <div>
                   <!-- Handoff badge -->
                   <div *ngIf="msg.is_handoff_ai" class="mb-0.5">
-                    <span class="text-[8px] font-semibold px-1.5 py-0.5 rounded-full"
-                      [class]="isDark() ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'">En attente agent</span>
+                    <span class="text-[8px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">En attente agent</span>
                   </div>
                   <div class="max-w-[70%] px-3 py-2.5 rounded-xl rounded-bl-md text-sm"
                     [class]="msg.is_handoff_ai
-                      ? (isDark() ? 'bg-orange-500/5 border border-orange-500/20 text-orange-200' : 'bg-orange-50 border border-orange-200 text-orange-900')
-                      : (isDark() ? 'bg-slate-800/50 border border-slate-700 text-slate-300' : 'bg-slate-50 border border-slate-200 text-slate-700')">
+                      ? 'bg-orange-50 border border-orange-200 text-orange-900 dark:bg-orange-500/5 dark:border-orange-500/20 dark:text-orange-200'
+                      : 'bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-300'">
                     {{msg.content}}
                   </div>
                   <!-- Confidence badge -->
@@ -446,12 +504,10 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
           </div>
 
           <!-- Agent Input (after takeover) -->
-          <div *ngIf="hasTakenOver()" class="px-5 py-3 border-t flex-shrink-0"
-            [class]="isDark() ? 'bg-[#0F172A]/60 border-slate-800' : 'bg-white border-slate-200'">
+          <div *ngIf="hasTakenOver()" class="px-5 py-3 border-t flex-shrink-0 bg-white border-slate-200 dark:bg-[#0F172A]/60 dark:border-slate-800">
             <form (ngSubmit)="sendAgentMessage()" class="flex items-center gap-3">
               <input [(ngModel)]="agentMessage" name="agentMsg" placeholder="Répondre au client..."
-                class="flex-1 px-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                [class]="isDark() ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400'" />
+                class="flex-1 px-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-amber-500/50 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
               <button type="submit" [disabled]="!agentMessage.trim()"
                 class="w-10 h-10 bg-amber-500 hover:bg-amber-400 disabled:opacity-30 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
@@ -501,6 +557,12 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   saveToKnowledge = false;
   resolveTags = '';
 
+  // Knowledge extraction modal
+  showKnowledgeModal = signal(false);
+  extractionLoading = signal(false);
+  extractedPairs = signal<any[]>([]);
+  savingKnowledge = signal(false);
+
   private eventSub?: Subscription;
   private sessionSocket$: WebSocketSubject<any> | null = null;
   private currentAgentMatricule = '';
@@ -514,7 +576,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     private toastService: ToastService
   ) { }
 
-  isDark = () => this.themeService.isDark();
+
   toggleTheme = () => this.themeService.toggleTheme();
 
   toggleSidebar() {
@@ -752,49 +814,121 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       }
     }
 
-    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/resolve`, body).subscribe({
-      next: () => {
-        this.toastService.show('Session résolue avec succès', 'success');
-        this.activeSession.set(null);
-        this.chatHistory.set([]);
-        this.hasTakenOver.set(false);
-        this.showBriefing.set(false);
-        this.briefing.set(null);
+    const sessionId = session.id;
+
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${sessionId}/resolve`, body).subscribe({
+      next: (res) => {
         this.showResolveDialog.set(false);
-        this.saveToKnowledge = false;
-        this.resolveTags = '';
-        this.sessionSocket$?.complete();
-        this.sessionSocket$ = null;
         this.loadQueue();
+
+        if (res.needs_knowledge_extraction) {
+          // Open the knowledge extraction modal instead of closing
+          this.triggerKnowledgeExtraction(sessionId);
+        } else {
+          this.toastService.show('Session résolue avec succès', 'success');
+          this.resetSessionState();
+        }
       }
     });
+  }
+
+  private triggerKnowledgeExtraction(sessionId: string): void {
+    this.showKnowledgeModal.set(true);
+    this.extractionLoading.set(true);
+    this.extractedPairs.set([]);
+
+    this.http.post<any>(`${environment.apiUrl}/api/v1/knowledge/extract-knowledge`, {
+      session_id: sessionId
+    }).subscribe({
+      next: (res) => {
+        // Add 'selected' flag for checkboxes (pre-check non-personal)
+        const pairs = (res.pairs || []).map((p: any) => ({
+          ...p,
+          selected: p.knowledge_type !== 'personal',
+        }));
+        this.extractedPairs.set(pairs);
+        this.extractionLoading.set(false);
+      },
+      error: () => {
+        this.extractionLoading.set(false);
+        this.toastService.show('Extraction échouée', 'error');
+        this.showKnowledgeModal.set(false);
+        this.resetSessionState();
+      }
+    });
+  }
+
+  saveExtractedKnowledge(): void {
+    const session = this.activeSession();
+    if (!session) return;
+
+    const selectedPairs = this.extractedPairs()
+      .filter((p: any) => p.selected && p.knowledge_type !== 'personal')
+      .map((p: any) => ({
+        knowledge_type: p.knowledge_type,
+        question: p.question,
+        answer: p.answer,
+        topic: p.topic,
+        reason: p.reason,
+      }));
+
+    if (selectedPairs.length === 0) {
+      this.toastService.show('Aucune paire sélectionnée', 'warning');
+      return;
+    }
+
+    this.savingKnowledge.set(true);
+
+    this.http.post<any>(`${environment.apiUrl}/api/v1/knowledge/save-knowledge`, {
+      session_id: session.id,
+      pairs: selectedPairs
+    }).subscribe({
+      next: (res) => {
+        this.savingKnowledge.set(false);
+        this.showKnowledgeModal.set(false);
+        this.toastService.show(
+          `${res.saved} paire${res.saved > 1 ? 's' : ''} sauvegardée${res.saved > 1 ? 's' : ''} dans la base de connaissances`,
+          'success'
+        );
+        this.resetSessionState();
+      },
+      error: () => {
+        this.savingKnowledge.set(false);
+        this.toastService.show('Erreur lors de la sauvegarde', 'error');
+      }
+    });
+  }
+
+  getSelectedPairCount(): number {
+    return this.extractedPairs().filter((p: any) => p.selected && p.knowledge_type !== 'personal').length;
+  }
+
+  private resetSessionState(): void {
+    this.activeSession.set(null);
+    this.chatHistory.set([]);
+    this.hasTakenOver.set(false);
+    this.showBriefing.set(false);
+    this.briefing.set(null);
+    this.saveToKnowledge = false;
+    this.resolveTags = '';
+    this.extractedPairs.set([]);
+    this.sessionSocket$?.complete();
+    this.sessionSocket$ = null;
   }
 
   // ─── UI Helpers ───
 
   getQueueItemClass(item: QueueItem): string {
     const active = this.activeSession()?.id === item.id;
-    if (this.isDark()) {
-      if (active) return 'bg-slate-800/80 border-indigo-500/50';
-      if (item.status === 'handoff_pending') return 'bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40';
-      return 'bg-slate-800/30 border-slate-700/50 hover:border-slate-600';
-    } else {
-      if (active) return 'bg-indigo-50 border-indigo-300';
-      if (item.status === 'handoff_pending') return 'bg-rose-50 border-rose-200 hover:border-rose-300';
-      return 'bg-white border-slate-200 hover:border-slate-300 shadow-sm';
-    }
+    if (active) return 'bg-indigo-50 border-indigo-300 dark:bg-slate-800/80 dark:border-indigo-500/50';
+    if (item.status === 'handoff_pending') return 'bg-rose-50 border-rose-200 hover:border-rose-300 dark:bg-rose-500/5 dark:border-rose-500/20 dark:hover:border-rose-500/40';
+    return 'bg-white border-slate-200 hover:border-slate-300 shadow-sm dark:bg-slate-800/30 dark:border-slate-700/50 dark:hover:border-slate-600';
   }
 
   getStatusBadge(status: string): string {
-    if (this.isDark()) {
-      if (status === 'handoff_pending') return 'bg-rose-500/10 text-rose-400';
-      if (status === 'agent_connected') return 'bg-emerald-500/10 text-emerald-400';
-      return 'bg-slate-700 text-slate-400';
-    } else {
-      if (status === 'handoff_pending') return 'bg-rose-100 text-rose-600';
-      if (status === 'agent_connected') return 'bg-emerald-100 text-emerald-600';
-      return 'bg-slate-100 text-slate-500';
-    }
+    if (status === 'handoff_pending') return 'bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400';
+    if (status === 'agent_connected') return 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400';
+    return 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400';
   }
 
   getStatusLabel(status: string): string {
@@ -804,9 +938,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   getConfidenceClass(confidence: number): string {
-    if (confidence >= 80) return this.isDark() ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700';
-    if (confidence >= 50) return this.isDark() ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-700';
-    return this.isDark() ? 'bg-rose-500/10 text-rose-400' : 'bg-rose-50 text-rose-700';
+    if (confidence >= 80) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400';
+    if (confidence >= 50) return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
+    return 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400';
   }
 
   formatTime(iso: string): string {

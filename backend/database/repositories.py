@@ -18,7 +18,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, cast, Date, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models import (
@@ -240,6 +240,7 @@ async def save_audit_log(
     latency_ms: Optional[int] = None,
     model_used: Optional[str] = None,
     confidence: Optional[float] = None,
+    tokens_used: Optional[int] = 0,
     events: Optional[Dict[str, Any]] = None,
 ) -> AuditLog:
     """Save a pipeline trace to the audit log."""
@@ -251,6 +252,7 @@ async def save_audit_log(
         latency_ms=latency_ms,
         model_used=model_used,
         confidence=confidence,
+        tokens_used=tokens_used,
         events=events,
     )
     db.add(log)
@@ -270,34 +272,149 @@ async def get_recent_audit_logs(
     return list(result.scalars().all())
 
 
-async def get_audit_stats(db: AsyncSession) -> Dict[str, Any]:
-    """Get aggregated audit statistics."""
-    total = await db.scalar(select(func.count(AuditLog.id)))
+async def get_audit_stats(
+    db: AsyncSession,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Get aggregated audit statistics, optionally filtered by date range."""
+    from datetime import timedelta
+
+    # Build base filter
+    filters = []
+    if start_date:
+        filters.append(AuditLog.timestamp >= datetime.fromisoformat(start_date))
+    if end_date:
+        # end_date is inclusive — add 1 day
+        end_dt = datetime.fromisoformat(end_date) + timedelta(days=1)
+        filters.append(AuditLog.timestamp < end_dt)
+
+    base_q = select(func.count(AuditLog.id))
+    if filters:
+        base_q = base_q.where(*filters)
+    total = await db.scalar(base_q)
     
     outcomes = {}
-    result = await db.execute(
-        select(AuditLog.outcome, func.count(AuditLog.id))
-        .group_by(AuditLog.outcome)
-    )
+    outcome_q = select(AuditLog.outcome, func.count(AuditLog.id)).group_by(AuditLog.outcome)
+    if filters:
+        outcome_q = outcome_q.where(*filters)
+    result = await db.execute(outcome_q)
     for outcome, count in result.all():
         if outcome:
             outcomes[outcome] = count
 
-    avg_latency = await db.scalar(
-        select(func.avg(AuditLog.latency_ms)).where(AuditLog.latency_ms.isnot(None))
-    )
+    latency_q = select(func.avg(AuditLog.latency_ms)).where(AuditLog.latency_ms.isnot(None))
+    if filters:
+        latency_q = latency_q.where(*filters)
+    avg_latency = await db.scalar(latency_q)
 
-    avg_confidence = await db.scalar(
-        select(func.avg(AuditLog.confidence)).where(AuditLog.confidence.isnot(None))
-    )
+    conf_q = select(func.avg(AuditLog.confidence)).where(AuditLog.confidence.isnot(None))
+    if filters:
+        conf_q = conf_q.where(*filters)
+    avg_confidence = await db.scalar(conf_q)
+
+    # Normalize: confidence is stored as 0-1 float → convert to 0-100 percentage
+    c = float(avg_confidence or 0)
+    c_pct = round(c * 100, 1) if c <= 1.0 else round(c, 1)
 
     return {
         "total_traces": total or 0,
         "outcomes": outcomes,
         "avg_latency_ms": round(avg_latency or 0),
-        "avg_confidence": round((avg_confidence or 0) * 100, 1),
+        "avg_confidence": c_pct,
     }
 
+async def get_audit_time_series(
+    db: AsyncSession,
+    days: int = 7,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Get daily time-series data for the dashboard, filtered by date range."""
+    from datetime import timedelta
+
+    # Build filter from explicit dates or fallback to days
+    filters = []
+    if start_date:
+        filters.append(AuditLog.timestamp >= datetime.fromisoformat(start_date))
+    if end_date:
+        end_dt = datetime.fromisoformat(end_date) + timedelta(days=1)
+        filters.append(AuditLog.timestamp < end_dt)
+    if not filters:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        filters.append(AuditLog.timestamp >= cutoff)
+    
+    # Cast timestamp to date for grouping
+    date_col = cast(AuditLog.timestamp, Date).label("day")
+    
+    result = await db.execute(
+        select(
+            date_col,
+            func.avg(AuditLog.latency_ms).label("avg_latency"),
+            func.avg(AuditLog.confidence).label("avg_confidence"),
+            func.count(AuditLog.id).label("total_traces"),
+            func.sum(AuditLog.tokens_used).label("total_tokens")
+        )
+        .where(*filters)
+        .group_by(date_col)
+        .order_by(date_col)
+    )
+    
+    series = []
+    for row in result.all():
+        day_date = row.day
+        # Use actual date string for x-axis (e.g., "May 18")
+        day_label = day_date.strftime("%b %d") if day_date else "Unk"
+        
+        # Normalize confidence: stored as 0-1 → convert to 0-100 integer
+        c = float(row.avg_confidence or 0)
+        c_pct = int(c * 100) if c <= 1.0 else int(c)
+        
+        series.append({
+            "day": day_label,
+            "date": str(day_date),
+            "rag_confidence": c_pct,
+            "response_time": round(row.avg_latency or 0),
+            "total_traces": row.total_traces,
+            "total_tokens": row.total_tokens or 0
+        })
+        
+    return series
+
+
+async def get_hourly_traffic(
+    db: AsyncSession,
+    target_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Get hourly query counts for a specific date (defaults to today)."""
+    from datetime import timedelta
+    
+    if target_date:
+        day_start = datetime.fromisoformat(target_date)
+    else:
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    day_end = day_start + timedelta(days=1)
+    
+    # Extract hour from timestamp
+    hour_col = func.extract('hour', AuditLog.timestamp).label("hour")
+    
+    result = await db.execute(
+        select(
+            hour_col,
+            func.count(AuditLog.id).label("count")
+        )
+        .where(AuditLog.timestamp >= day_start, AuditLog.timestamp < day_end)
+        .group_by(hour_col)
+        .order_by(hour_col)
+    )
+    
+    # Build a full 24h array, filling gaps with 0
+    hour_counts = {int(row.hour): row.count for row in result.all()}
+    return [
+        {"hour": h, "label": f"{h:02d}:00", "count": hour_counts.get(h, 0)}
+        for h in range(24)
+    ]
 
 # ==============================================================
 # KNOWLEDGE EMBEDDINGS (pgvector)

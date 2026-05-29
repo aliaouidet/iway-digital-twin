@@ -128,13 +128,26 @@ async def execute_claims_graph(
     thread_id = f"{session.get('user_matricule', 'anon')}-{session['id']}"
     config = {"configurable": {"thread_id": thread_id}}
 
+    import time
     full_response = ""
     tools_called = []
     active_nodes_seen = set()
+    node_timings = {}  # {langgraph_node: {start, end}}
 
     try:
         async for event in graph.astream_events(initial_state, config=config, version="v2"):
             kind = event["event"]
+            metadata = event.get("metadata") or {}
+            langgraph_node = metadata.get("langgraph_node")
+
+            # -- Track Sub-Spans for Nodes (Filtered & Consolidated) --
+            if langgraph_node and langgraph_node not in ("__start__", "__end__"):
+                if kind == "on_chain_start":
+                    if langgraph_node not in node_timings:
+                        node_timings[langgraph_node] = {"start": time.perf_counter(), "end": None}
+                elif kind == "on_chain_end":
+                    if langgraph_node in node_timings:
+                        node_timings[langgraph_node]["end"] = time.perf_counter()
 
             # -- Stream LLM tokens from user-facing nodes --
             if kind == "on_chat_model_stream":
@@ -171,6 +184,18 @@ async def execute_claims_graph(
         intent = state_values.get("intent")
         graph_tools = state_values.get("tools_called", [])
 
+        # Process consolidated node timings into sub_spans
+        sub_spans = []
+        for name, timing in node_timings.items():
+            if timing["end"] is not None:
+                duration_ms = (timing["end"] - timing["start"]) * 1000
+                
+                # If this was the multi_executor, rename it to show the actual tools running
+                if name == "multi_executor" and graph_tools:
+                    name = f"tool_execution [{', '.join(graph_tools)}]"
+                    
+                sub_spans.append({"name": name, "duration_ms": round(duration_ms, 1)})
+
         # Use the streamed full_response, or fall back to the graph's final message
         if not full_response.strip():
             messages = state_values.get("messages", [])
@@ -188,6 +213,12 @@ async def execute_claims_graph(
                 "source": "claims_graph",
                 "tools_called": graph_tools,
                 "degraded": False,
+                "retrieved_docs": [
+                    {"content": d.content, "source_id": d.source_id, "similarity": d.similarity}
+                    for d in state_values.get("retrieved_docs", [])
+                ],
+                "graph_context": state_values.get("graph_context", ""),
+                "sub_spans": sub_spans,
             }
         else:
             return None  # Empty response — fall back

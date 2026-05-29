@@ -19,6 +19,7 @@ langchain-openai>=0.1.0
 langchain-community>=0.2.0
 langchain-google-genai>=1.0.0
 langchain-postgres>=0.0.3
+langchain-huggingface>=0.0.3
 langchain-text-splitters>=0.2.0
 pgvector>=0.2.5
 openai>=1.20.0

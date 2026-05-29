@@ -468,28 +468,11 @@ async def resolve_session(
         "timestamp": datetime.now().isoformat()
     })
 
-    # --- HITL Feedback Loop ---
-    hitl_result = None
-    if body and body.save_to_knowledge:
-        user_questions = [m for m in session["history"] if m["role"] == "user"]
-        agent_answers = [m for m in session["history"] if m["role"] == "agent"]
-
-        if user_questions and agent_answers:
-            question = user_questions[-1]["content"]
-            answer = agent_answers[-1]["content"]
-            user = MOCK_USERS.get(matricule, {})
-            agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip()
-
-            from backend.services.rag_service import async_add_hitl_knowledge
-            hitl_result = await async_add_hitl_knowledge(
-                session_id=session_id,
-                question=question,
-                answer=answer,
-                agent_matricule=matricule,
-                agent_name=agent_name,
-                tags=body.tags,
-            )
-            logger.info(f"🧠 HITL knowledge saved from session {session_id}")
+    # --- HITL: Signal frontend to open knowledge extraction modal ---
+    # The old logic blindly saved user_questions[-1] + agent_answers[-1].
+    # Now we just flag the response so the frontend calls /knowledge/extract-knowledge
+    # with the full conversation for LLM-powered extraction + agent review.
+    needs_extraction = body and body.save_to_knowledge
 
     # Notify user
     user_ws = session.get("user_ws")
@@ -508,8 +491,8 @@ async def resolve_session(
     asyncio.create_task(_persist_session_status(session_id, "resolved"))
 
     result = {"status": "resolved"}
-    if hitl_result:
-        result["hitl_knowledge"] = hitl_result
+    if needs_extraction:
+        result["needs_knowledge_extraction"] = True
     return result
 
 

@@ -22,6 +22,9 @@ import logging
 from collections import defaultdict
 from datetime import datetime
 
+from opentelemetry import trace as otel_trace
+from opentelemetry.trace import format_trace_id
+
 from fastapi import WebSocket, WebSocketDisconnect
 
 from backend.config import get_settings
@@ -107,12 +110,15 @@ async def get_rag_ai_response(query: str) -> dict:
                 "hitl_boosted": is_hitl,
                 "similarity": top["similarity"],
                 "degraded": False,
+                "retrieved_docs": results,
             }
         elif results:
             top = results[0]
             confidence = int(top["similarity"] * 100)
 
-            if confidence < int(settings.CONFIDENCE_THRESHOLD * 100):
+            # Reject low-similarity matches — they are irrelevant noise
+            if top["similarity"] < 0.50:
+                logger.info(f"RAG result below 50% similarity ({top['similarity']:.2f}) — rejecting as noise")
                 return {"text": None, "confidence": confidence, "degraded": False}
             else:
                 response_text = top["metadata"].get("reponse", top["chunk_text"])
@@ -121,10 +127,12 @@ async def get_rag_ai_response(query: str) -> dict:
                     "text": response_text,
                     "confidence": confidence,
                     "source": top["source_type"],
+                    "similarity": top["similarity"],
                     "degraded": False,
+                    "retrieved_docs": results,
                 }
         else:
-            return {"text": None, "confidence": 0, "degraded": False}
+            return {"text": None, "confidence": 0, "degraded": False, "retrieved_docs": []}
 
     except TimeoutError:
         llm_circuit.record_failure()
@@ -145,6 +153,10 @@ def get_simulated_ai_response(query: str) -> dict:
     """Hardcoded responses for demo — used when RAG store is empty."""
     q = query.lower()
     responses = {
+        "bonjour": ("Bonjour ! Je suis l'assistant I-Way. Comment puis-je vous aider avec votre assurance ?", 99),
+        "salut": ("Bonjour ! Je suis l'assistant I-Way. Comment puis-je vous aider ?", 99),
+        "hello": ("Bonjour ! Je suis l'assistant I-Way. Comment puis-je vous aider ?", 99),
+        "hi": ("Bonjour ! Je suis l'assistant I-Way. Comment puis-je vous aider ?", 99),
         "dentaire": ("Selon l'Article 4, le plafond annuel pour les soins dentaires est de 600 TND par beneficiaire.", 94),
         "remboursement": ("Les remboursements sont traites sous 48h ouvrees pour les FSE. Les feuilles papier: 15 jours ouvres.", 88),
         "naissance": ("La prime de naissance est de 300 TND par enfant, versee sur presentation de l'acte de naissance.", 91),
@@ -236,10 +248,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     # Graph handles this via pre_intake_router → stall_node
                     await websocket.send_json({"type": "thinking", "status": "Réflexion en cours...", "node": "stall"})
 
+                    current_span = otel_trace.get_current_span()
+                    otel_id = format_trace_id(current_span.get_span_context().trace_id) if current_span.get_span_context().trace_id else None
+
                     trace = RequestTrace(
                         session_id=session_id,
                         user_matricule=session.get("user_matricule", ""),
                         query=content,
+                        otel_trace_id=otel_id
                     )
                     span_recv = trace.start_span("RECEIVED", message_length=len(content))
                     span_recv.finish()
@@ -320,10 +336,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     await websocket.send_json({"type": "thinking", "status": "Analyse de votre demande...", "node": "intake"})
 
                     # --- Start trace ---
+                    current_span = otel_trace.get_current_span()
+                    otel_id = format_trace_id(current_span.get_span_context().trace_id) if current_span.get_span_context().trace_id else None
+
                     trace = RequestTrace(
                         session_id=session_id,
                         user_matricule=session.get("user_matricule", ""),
                         query=content,
+                        otel_trace_id=otel_id
                     )
                     span_recv = trace.start_span("RECEIVED", message_length=len(content))
                     span_recv.finish()
@@ -348,8 +368,22 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         logger.warning(f"Semantic Cache check failed: {e}")
                         pass  # Cache miss — proceed to graph
 
+                    # -- TIER 0.5: Fast Semantic Router --
+                    # Route to Graph by default. Only skip for trivial greetings.
+                    is_complex = True
+                    if not cache_hit:
+                        span_router = trace.start_span("SEMANTIC_ROUTER")
+                        text_lower = content.lower().strip()
+                        # Only bypass LangGraph for trivial single-word greetings
+                        greeting_only = ["bonjour", "salut", "hello", "hi", "hey", "bonsoir", "coucou", "merci", "thanks", "ok", "oui", "non"]
+                        if text_lower in greeting_only:
+                            is_complex = False
+                            span_router.finish(intent="GREETING", routed_to="SIMULATED")
+                        else:
+                            span_router.finish(intent="COMPLEX_WORKFLOW", routed_to="GRAPH")
+
                     # -- TIER 1: Claims StateGraph (primary) --
-                    if llm_circuit.can_execute():
+                    if not cache_hit and is_complex and llm_circuit.can_execute():
                         span_graph = trace.start_span("GRAPH_EXECUTION")
                         try:
                             ai_result = await asyncio.wait_for(
@@ -361,6 +395,9 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                     tools=ai_result.get("tools_called", []),
                                     source="claims_graph",
                                     intent=ai_result.get("intent"),
+                                    retrieved_docs=ai_result.get("retrieved_docs", []),
+                                    graph_context=ai_result.get("graph_context", ""),
+                                    sub_spans=ai_result.get("sub_spans", [])
                                 )
                                 llm_circuit.record_success()
                             else:
@@ -372,20 +409,32 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         except Exception as e:
                             span_graph.finish(status="error", error=str(e))
                             logger.warning(f"Graph error: {e} — falling back to RAG")
-
+                            
+                            # If we explicitly hit a 429 Quota error, don't silently fallback to RAG/Simulated
+                            error_str = str(e).lower()
+                            if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
+                                ai_result = {
+                                    "text": "⚠️ **Service Dégradé:** Mon moteur d'intelligence artificielle (Gemini API) a atteint son quota gratuit de requêtes. Je ne peux pas traiter les demandes complexes pour le moment. Veuillez patienter ou contacter le 71 800 800.",
+                                    "confidence": 99,
+                                    "source": "circuit_breaker",
+                                    "degraded": True
+                                }
                     # -- TIER 2: RAG-only fallback --
                     if ai_result is None:
-                        from backend.services.rag_service import knowledge_store
-                        if knowledge_store.count > 0:
-                            span_rag = trace.start_span("RAG_FALLBACK", store_count=knowledge_store.count)
+                        from backend.services.rag_service import get_knowledge_stats
+                        stats = get_knowledge_stats()
+                        if stats.get("total_entries", 0) > 0:
+                            span_rag = trace.start_span("RAG_FALLBACK", store_count=stats.get("total_entries", 0))
                             ai_result = await get_rag_ai_response(content)
                             span_rag.finish(
-                                similarity=ai_result.get("similarity"),
-                                source=ai_result.get("source"),
-                                degraded=ai_result.get("degraded", False),
+                                similarity=ai_result.get("similarity") if ai_result else None,
+                                source=ai_result.get("source") if ai_result else None,
+                                degraded=ai_result.get("degraded", False) if ai_result else False,
+                                retrieved_docs=ai_result.get("retrieved_docs", []) if ai_result else []
                             )
-                        else:
-                            # -- TIER 3: Simulated response (no RAG store) --
+                        
+                        # -- TIER 3: Simulated response (RAG miss or empty store) --
+                        if ai_result is None or ai_result.get("text") is None:
                             span_sim = trace.start_span("SIMULATED_RESPONSE")
                             await asyncio.sleep(0.5 + random.random() * 0.5)
                             ai_result = get_simulated_ai_response(content)
@@ -620,8 +669,16 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     trace_store.add(trace)
                     await broadcast_trace(trace)
 
-                    # --- Cache store (only for high-confidence, non-cached responses) ---
-                    if not cache_hit and ai_result and ai_result.get("confidence", 0) >= 70:
+                    # --- Cache store (only for high-confidence Graph/RAG responses, never degraded/simulated) ---
+                    source = ai_result.get("source", "")
+                    is_cacheable = (
+                        not cache_hit
+                        and ai_result
+                        and ai_result.get("confidence", 0) >= 70
+                        and not ai_result.get("degraded", False)
+                        and source in ("claims_graph", "iway_api", "hitl_validated")
+                    )
+                    if is_cacheable:
                         try:
                             from backend.services.semantic_cache import store_semantic_cache
                             asyncio.create_task(store_semantic_cache(content, ai_result.get("text", "")))

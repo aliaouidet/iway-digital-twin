@@ -8,12 +8,17 @@ Traces every chat request through the pipeline stages:
   4. RESPONSE    — AI response streamed back to user
   5. ESCALATED   — Handoff triggered (low confidence / timeout / circuit open)
 
-Each trace captures timing, metadata, and outcome for real-time dashboard display.
+Architecture:
+  - PostgreSQL `audit_log` is the SINGLE SOURCE OF TRUTH for all metrics.
+  - The in-memory ring buffer exists ONLY for the live trace feed (waterfall view).
+  - WebSocket broadcasts individual traces for real-time UI updates.
+  - All dashboard KPIs, charts, and analytics read from PostgreSQL.
 """
 
 import uuid
 import time
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from collections import deque
@@ -68,6 +73,7 @@ class RequestTrace:
     query: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     started_at: float = field(default_factory=time.time)
+    otel_trace_id: Optional[str] = None
 
     # Pipeline stages
     spans: List[TraceSpan] = field(default_factory=list)
@@ -77,6 +83,7 @@ class RequestTrace:
     confidence: Optional[float] = None
     source_type: Optional[str] = None
     total_duration_ms: Optional[float] = None
+    tokens_used: int = 0
 
     def start_span(self, name: str, **metadata) -> TraceSpan:
         """Start a new pipeline stage."""
@@ -90,10 +97,12 @@ class RequestTrace:
         self.confidence = confidence
         self.source_type = source_type
         self.total_duration_ms = round((time.time() - self.started_at) * 1000, 1)
+        self.tokens_used = sum(span.metadata.get("tokens", 0) for span in self.spans)
 
     def to_dict(self) -> dict:
         return {
             "trace_id": self.trace_id,
+            "otel_trace_id": self.otel_trace_id,
             "session_id": self.session_id,
             "user_matricule": self.user_matricule,
             "query": self.query[:100],  # Truncate for dashboard
@@ -108,130 +117,92 @@ class RequestTrace:
 
 
 # ==============================================================
-# TRACE STORE — In-memory ring buffer of recent traces
+# TRACE STORE — In-memory ring buffer for LIVE FEED ONLY
 # ==============================================================
 
 class TraceStore:
     """
-    In-memory trace storage with a configurable ring buffer.
-    Keeps the last N traces for dashboard display.
+    Lightweight ring buffer for the live trace feed (waterfall view).
+
+    This is NOT the source of truth for metrics. All KPIs, charts, and
+    analytics are computed from PostgreSQL via `repositories.py`.
+    This buffer exists solely so the admin can see the last N traces
+    in the real-time log viewer without hitting the database.
     """
 
     def __init__(self, max_traces: int = 500):
         self._traces: deque = deque(maxlen=max_traces)
-        self._stats = {
-            "total_requests": 0,
-            "rag_resolved": 0,
-            "agent_resolved": 0,
-            "ai_fallback": 0,
-            "human_escalated": 0,
-            "errors": 0,
-            "degraded": 0,
-            "total_duration_ms": 0,
-        }
 
     def add(self, trace: RequestTrace):
-        """Add a completed trace."""
+        """Add a completed trace to the live feed buffer."""
         self._traces.appendleft(trace)
-        self._stats["total_requests"] += 1
-        if trace.total_duration_ms:
-            self._stats["total_duration_ms"] += trace.total_duration_ms
-
-        # Update counters
-        outcome = trace.outcome or "unknown"
-        if outcome == "RAG_RESOLVED":
-            self._stats["rag_resolved"] += 1
-        elif outcome == "AGENT_RESOLVED":
-            self._stats["agent_resolved"] += 1
-        elif outcome == "AI_FALLBACK":
-            self._stats["ai_fallback"] += 1
-        elif outcome == "HUMAN_ESCALATED":
-            self._stats["human_escalated"] += 1
-        elif outcome == "ERROR":
-            self._stats["errors"] += 1
-        elif outcome == "DEGRADED":
-            self._stats["degraded"] += 1
 
     def get_recent(self, limit: int = 50) -> List[dict]:
-        """Get the most recent traces."""
+        """Get the most recent traces for the live log viewer."""
         return [t.to_dict() for t in list(self._traces)[:limit]]
-
-    def get_stats(self) -> dict:
-        """Get aggregated pipeline statistics."""
-        total = self._stats["total_requests"]
-        avg_duration = (
-            round(self._stats["total_duration_ms"] / total, 1)
-            if total > 0 else 0
-        )
-        return {
-            "total_requests": total,
-            "rag_resolved": self._stats["rag_resolved"],
-            "agent_resolved": self._stats["agent_resolved"],
-            "ai_fallback": self._stats["ai_fallback"],
-            "human_escalated": self._stats["human_escalated"],
-            "errors": self._stats["errors"],
-            "degraded": self._stats["degraded"],
-            "avg_duration_ms": avg_duration,
-            "rag_success_rate": round(
-                self._stats["rag_resolved"] / max(total, 1) * 100, 1
-            ),
-            "agent_success_rate": round(
-                self._stats["agent_resolved"] / max(total, 1) * 100, 1
-            ),
-            "escalation_rate": round(
-                self._stats["human_escalated"] / max(total, 1) * 100, 1
-            ),
-            "error_rate": round(
-                self._stats["errors"] / max(total, 1) * 100, 1
-            ),
-        }
 
     @property
     def count(self) -> int:
         return len(self._traces)
 
 
-# --- Global trace store ---
+# --- Global trace store (live feed only) ---
 trace_store = TraceStore(max_traces=500)
 
 
 # ==============================================================
-# PERSISTENCE HELPER — Dual-writes traces to PostgreSQL
+# PERSISTENCE — Writes traces to PostgreSQL (source of truth)
 # ==============================================================
+
+_audit_queue = asyncio.Queue()
 
 async def persist_trace(trace: RequestTrace):
-    """Persist a completed trace to the audit_log table.
-    
-    Fire-and-forget: errors are logged but never propagate.
-    The in-memory store remains the source of truth for real-time display.
-    """
-    try:
-        from backend.database.connection import async_session_factory
-        from backend.database.repositories import save_audit_log
+    """Enqueue a completed trace to be persisted to PostgreSQL in batches."""
+    _audit_queue.put_nowait(trace)
 
-        async with async_session_factory() as db:
-            await save_audit_log(
-                db=db,
-                trace_id=trace.trace_id,
-                event_type="user_query",
-                session_id=trace.session_id if trace.session_id else None,
-                outcome=trace.outcome,
-                latency_ms=round(trace.total_duration_ms) if trace.total_duration_ms else None,
-                model_used=trace.source_type,
-                confidence=trace.confidence,
-                events={
-                    "query": trace.query[:200],
-                    "spans": [s.to_dict() for s in trace.spans],
-                },
-            )
-            await db.commit()
-    except Exception as e:
-        # Never let persistence failure affect the hot path
-        logger.debug(f"Trace persistence skipped (DB not available): {e}")
+async def audit_worker():
+    """Background worker that pulls traces from the queue and batch-inserts them."""
+    from backend.database.connection import async_session_factory
+    from backend.database.repositories import save_audit_log
+
+    logger.info("🛠️ Started Audit Log Queue Worker")
+    while True:
+        try:
+            batch = []
+            while not _audit_queue.empty() and len(batch) < 50:
+                batch.append(_audit_queue.get_nowait())
+            
+            if batch:
+                async with async_session_factory() as db:
+                    for trace in batch:
+                        await save_audit_log(
+                            db=db,
+                            trace_id=trace.trace_id,
+                            event_type="user_query",
+                            session_id=trace.session_id if trace.session_id else None,
+                            outcome=trace.outcome,
+                            latency_ms=round(trace.total_duration_ms) if trace.total_duration_ms else None,
+                            model_used=trace.source_type,
+                            confidence=trace.confidence,
+                            tokens_used=trace.tokens_used,
+                            events={
+                                "otel_trace_id": trace.otel_trace_id,
+                                "query": trace.query[:200],
+                                "spans": [s.to_dict() for s in trace.spans],
+                            },
+                        )
+                    await db.commit()
+            
+            await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Audit worker error: {e}")
+            await asyncio.sleep(2)
 
 
 # ==============================================================
-# BROADCAST HELPER — Sends traces to WebSocket subscribers
+# BROADCAST — Sends individual traces to WebSocket subscribers
 # ==============================================================
 
 _ws_manager_ref = None
@@ -246,13 +217,14 @@ def set_trace_ws_manager(ws_manager):
 async def broadcast_trace(trace: RequestTrace):
     """Broadcast a completed trace to all connected admin/agent dashboards
     and persist it to PostgreSQL for durability."""
-    # Persist to DB (fire-and-forget)
+    # Persist to DB (source of truth)
     try:
         await persist_trace(trace)
     except Exception:
         pass
 
-    # Broadcast to WebSocket subscribers
+    # Broadcast individual trace to WebSocket subscribers
+    # (the frontend uses these for the live log feed, NOT for KPI computation)
     if _ws_manager_ref:
         try:
             await _ws_manager_ref.broadcast({

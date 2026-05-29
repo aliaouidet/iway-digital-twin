@@ -169,6 +169,8 @@ class ClaimsGraphState(TypedDict):
     draft_response: Optional[str]
     confidence: Optional[float]        # 0.0 to 1.0, overall response confidence
     tools_called: list[str]            # Track which tools were used
+    compliance_notes: list[str]        # Issues flagged by compliance_check_node
+    retry_count: int                   # Self-correction retry count (max 2)
 
     # ── Human-in-the-Loop ─────────────────────────────────────
     human_decision: Optional[HumanDecision]

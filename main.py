@@ -26,7 +26,7 @@ from backend.config import get_settings
 from backend.routers.auth import router as auth_router, auth_state
 from backend.routers.iway_mock import router as iway_router, MOCK_ESCALATION_TICKETS
 from backend.routers.sessions import router as sessions_router, SESSIONS, set_ws_manager
-from backend.routers.dashboard import router as dashboard_router, SYSTEM_LOGS
+from backend.routers.dashboard import router as dashboard_router
 from backend.routers.knowledge import router as knowledge_router
 from backend.routers.corrections import router as corrections_router
 from backend.routers.monitoring import router as monitoring_router
@@ -82,12 +82,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Redis pool init failed (non-critical): {e}")
 
+    # --- Start Audit Worker ---
+    from backend.services.tracing import audit_worker
+    audit_task = asyncio.create_task(audit_worker())
+
     global _app_ready
     _app_ready = True
     logger.info("✅ Digital Twin Online: Keys Generated, Graph Compiled, Routers Loaded.")
     yield
     # --- Graceful shutdown ---
     _app_ready = False
+    audit_task.cancel()
     try:
         from backend.services.redis_client import close_redis
         await close_redis()
@@ -242,18 +247,22 @@ async def websocket_events(websocket: WebSocket, token: str = None):
     await ws_manager.connect(websocket, role=user.get("role", "Agent"), matricule=matricule)
     try:
         while True:
-            logs = SYSTEM_LOGS
-            total = len(logs)
-            rag_resolved = sum(1 for l in logs if l["outcome"] == "RAG_RESOLVED")
+            from backend.database.connection import async_session_factory
+            from backend.database.repositories import get_audit_stats
+            
+            async with async_session_factory() as db:
+                stats = await get_audit_stats(db)
+                outcomes = stats.get("outcomes", {})
+                
             pending_sessions = sum(1 for s in SESSIONS.values() if s["status"] == "handoff_pending")
             await websocket.send_json({
                 "type": "METRIC_UPDATE",
                 "payload": {
-                    "total_requests": total,
-                    "rag_resolved": rag_resolved,
-                    "ai_fallback": sum(1 for l in logs if l["outcome"] == "AI_FALLBACK"),
-                    "human_escalated": sum(1 for l in logs if l["outcome"] == "HUMAN_ESCALATED"),
-                    "errors": sum(1 for l in logs if l["outcome"] == "ERROR"),
+                    "total_requests": stats.get("total_traces", 0),
+                    "rag_resolved": outcomes.get("RAG_RESOLVED", 0),
+                    "ai_fallback": outcomes.get("AI_FALLBACK", 0),
+                    "human_escalated": outcomes.get("HUMAN_ESCALATED", 0),
+                    "errors": outcomes.get("ERROR", 0),
                     "open_tickets": len(MOCK_ESCALATION_TICKETS),
                     "pending_handoffs": pending_sessions,
                     "active_sessions": len([s for s in SESSIONS.values() if s["status"] != "resolved"]),

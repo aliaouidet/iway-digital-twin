@@ -3,12 +3,13 @@ Node 3: Draft Response — LLM generation with RAG + system data.
 
 Generates a user-facing response by injecting RAG context,
 extracted claim details, AND system records into the LLM prompt.
-Self-assesses confidence via a CONFIDENCE: line parsed from output.
+Self-assesses confidence via structured output (Pydantic model).
 """
 
 import json
 import logging
 
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from state import ClaimsGraphState
@@ -17,6 +18,23 @@ from backend.services.conversation_memory import build_conversation_context
 from backend.services.input_sanitizer import wrap_user_message
 
 logger = logging.getLogger("I-Way-Twin")
+
+
+# ── Structured Output Model ───────────────────────────────────
+
+class DraftOutput(BaseModel):
+    """Structured LLM output for draft response + confidence."""
+    response: str = Field(
+        description="La réponse complète en français, professionnelle et empathique (3-5 phrases max)"
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0,
+        description="Score de confiance entre 0.0 et 1.0. "
+                    "0.9-1.0: confirmé par le contexte. "
+                    "0.7-0.89: probable. "
+                    "0.5-0.69: partiel. "
+                    "0.0-0.49: impossible de répondre."
+    )
 
 
 DRAFT_SYSTEM_PROMPT = """Tu es I-Sante, l'assistant virtuel de la mutuelle I-Way Solutions.
@@ -41,27 +59,17 @@ REGLES:
 
 {claim_section}
 
-{records_section}
-
-IMPORTANT -- A la fin de ta reponse, ajoute sur une NOUVELLE ligne:
-CONFIDENCE: [un nombre entre 0.0 et 1.0]
-
-Ce score reflete ta confiance dans la reponse:
-- 0.9-1.0: Reponse directement confirmee par le contexte ou les donnees systeme
-- 0.7-0.89: Reponse probable mais pas explicitement confirmee
-- 0.5-0.69: Reponse partielle, informations manquantes
-- 0.0-0.49: Impossible de repondre correctement avec le contexte disponible"""
+{records_section}"""
 
 
-def _parse_confidence(response_text: str) -> tuple[float, str]:
+def _parse_confidence_fallback(response_text: str) -> tuple[float, str]:
     """
-    Extract the CONFIDENCE: X.XX line from the LLM response.
+    FALLBACK: Extract the CONFIDENCE: X.XX line from raw LLM text.
 
-    Returns (confidence_float, clean_response_without_confidence_line).
-    If parsing fails, returns a conservative 0.5 score.
+    Only used when structured output fails. Returns (confidence, clean_text).
     """
     lines = response_text.split("\n")
-    confidence = 0.5  # Conservative default
+    confidence = 0.5
     clean_lines = []
 
     for line in lines:
@@ -135,9 +143,21 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
 
     Generates a response using the LLM with injected RAG context,
     extracted claim details, AND system records from DB tool nodes.
-    Parses the LLM's self-assessed confidence score to power the
-    route_by_confidence conditional edge.
+    Uses structured output for reliable confidence scoring.
+
+    SELF-CORRECTION: When compliance_notes exist from a previous attempt,
+    injects them into the prompt so the LLM can fix its mistakes.
     """
+    # -- Self-correction context --
+    retry_count = state.get("retry_count", 0) or 0
+    compliance_notes = state.get("compliance_notes") or []
+    is_retry = retry_count > 0 and len(compliance_notes) > 0
+
+    if is_retry:
+        logger.info(
+            f"🔄 Self-correction attempt {retry_count + 1}: "
+            f"fixing {len(compliance_notes)} compliance issue(s)"
+        )
     # -- Build the context section from retrieved docs --
     retrieved_docs = state.get("retrieved_docs") or []
     claim_details = state.get("claim_details")
@@ -216,6 +236,19 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
     except Exception as e:
         logger.debug(f"Conversation memory unavailable: {e}")
 
+    # -- Build self-correction section (only on retry) --
+    correction_section = ""
+    if is_retry:
+        correction_section = (
+            "\n\n⚠️ ERREURS A CORRIGER (ta réponse précédente a été rejetée):\n"
+            + "\n".join(f"- {note}" for note in compliance_notes)
+            + "\n\nRÈGLES DE CORRECTION:\n"
+            "- Si un matricule a été divulgué, remplace-le par une formulation générique ('votre dossier', 'votre compte')\n"
+            "- Si un montant dépasse les plafonds connus, vérifie et corrige\n"
+            "- Si un numéro de téléphone inconnu a été cité, supprime-le\n"
+            "- NE RÉPÈTE PAS les mêmes erreurs."
+        )
+
     # -- Compose the full prompt --
     system_prompt = DRAFT_SYSTEM_PROMPT.format(
         conversation_context=conversation_context,
@@ -224,27 +257,38 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
         graph_context_section=graph_context_section,
         claim_section=claim_section,
         records_section=records_section,
-    )
+    ) + correction_section
 
     logger.info(
         f"Drafting response with {len(retrieved_docs)} docs, "
         f"claim_details={'present' if claim_section else 'none'}, "
         f"system_records={'present' if system_records else 'none'}"
+        f"{' [RETRY ' + str(retry_count + 1) + ']' if is_retry else ''}"
     )
 
     # Wrap user message in XML delimiters for prompt injection defense
     user_message = state["messages"][-1]
     safe_content = wrap_user_message(user_message.content)
 
-    response = await llm.ainvoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=safe_content),
-    ])
-
-    raw_response = response.content.strip()
-
-    # -- Parse LLM self-assessed confidence --
-    llm_confidence, clean_response = _parse_confidence(raw_response)
+    # -- Structured output: response + confidence in one call --
+    try:
+        structured_llm = llm.with_structured_output(DraftOutput)
+        draft_output = await structured_llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=safe_content),
+        ])
+        clean_response = draft_output.response.strip()
+        llm_confidence = draft_output.confidence
+        logger.info(f"Structured output OK — LLM confidence: {llm_confidence:.2f}")
+    except Exception as e:
+        # Fallback: raw text + manual parsing (resilience)
+        logger.warning(f"Structured output failed, falling back to text parsing: {e}")
+        response = await llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=safe_content),
+        ])
+        raw_response = response.content.strip()
+        llm_confidence, clean_response = _parse_confidence_fallback(raw_response)
 
     # -- Confidence Scoring (Multi-Signal Fusion) --
     rag_confidence = state.get("rag_confidence", 0.0) or 0.0
@@ -283,4 +327,6 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
         "draft_response": clean_response,
         "confidence": confidence,
         "tools_called": tools_used,
+        "retry_count": retry_count + 1,       # Increment for self-correction tracking
+        "compliance_notes": [],                # Clear previous notes for fresh check
     }

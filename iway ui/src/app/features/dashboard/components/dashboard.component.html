@@ -1,0 +1,149 @@
+<div class="space-y-8">
+  <div class="flex items-center justify-between flex-wrap gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">Support Overview</h1>
+      <p class="text-slate-500 mt-1 text-sm">Real-time metrics for AI RAG support system</p>
+    </div>
+
+    <!-- Date Filter -->
+    <div class="flex items-center gap-2 flex-wrap">
+      <!-- Quick Presets -->
+      <div class="flex gap-1 bg-slate-100 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-200 dark:border-slate-700/50">
+        <button *ngFor="let p of [['all','All Time'],['today','Today'],['7d','7 Days'],['30d','30 Days']]"
+          (click)="onPreset(p[0])"
+          [class]="activePreset() === p[0]
+            ? 'px-3 py-1.5 bg-indigo-600 shadow-sm rounded-lg text-[11px] font-semibold text-white transition-all cursor-pointer'
+            : 'px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all cursor-pointer'">
+          {{p[1]}}
+        </button>
+      </div>
+
+      <!-- Date Pickers -->
+      <div class="flex items-center gap-1.5">
+        <input type="date" [value]="startDate()" (change)="onDateChange('start', $event)"
+          [max]="getTodayStr()"
+          class="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 outline-none transition-all" />
+        <span class="text-slate-400 text-[10px]">to</span>
+        <input type="date" [value]="endDate()" (change)="onDateChange('end', $event)"
+          [max]="getTodayStr()"
+          class="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 outline-none transition-all" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div *ngIf="isLoading()" class="grid grid-cols-1 md:grid-cols-6 gap-4">
+    <div *ngFor="let _ of [1,2,3,4,5,6]" class="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700/50 p-5 animate-pulse shadow-sm">
+      <div class="h-3 bg-slate-200 dark:bg-slate-700 rounded w-20 mb-3"></div>
+      <div class="h-7 bg-slate-200 dark:bg-slate-700 rounded w-14 mb-2"></div>
+      <div class="h-3 bg-slate-200 dark:bg-slate-700 rounded w-24"></div>
+    </div>
+  </div>
+
+  <!-- Key Metrics (6 cards) -->
+  <div *ngIf="!isLoading() && metrics()" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+    <!-- Total Requests -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md cursor-pointer">
+      <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+        <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Total Requests
+      </div>
+      <div class="text-2xl font-extrabold text-slate-800 dark:text-white tracking-tight">{{metrics()!.total_requests | number}}</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium">Pipeline active</div>
+    </div>
+
+    <!-- RAG Resolved -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-emerald-300 dark:hover:border-emerald-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
+      <div class="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+      <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider relative">
+         <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span> RAG Resolved
+      </div>
+      <div class="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight relative">{{metrics()!.rag_resolved}}</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium relative">{{metrics()!.rag_success_rate}}% success</div>
+    </div>
+
+    <!-- GenAI Fallback -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-indigo-300 dark:hover:border-indigo-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
+      <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+      <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider relative">
+         <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.8)]"></span> GenAI Fallback
+      </div>
+      <div class="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight relative">{{metrics()!.ai_fallback}}</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium relative">{{metrics()!.fallback_rate}}% rate</div>
+    </div>
+
+    <!-- Human Escalated -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-rose-100 dark:border-rose-800/30 transition-all duration-300 hover:scale-[1.02] hover:border-rose-300 dark:hover:border-rose-500/50 hover:shadow-md cursor-pointer relative overflow-hidden">
+      <div class="text-rose-500 dark:text-rose-400 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+         <span class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shadow-[0_0_6px_rgba(244,63,94,0.8)]"></span> Human Required
+      </div>
+      <div class="text-2xl font-extrabold text-rose-600 dark:text-rose-400 tracking-tight">{{metrics()!.human_escalated}}</div>
+      <div class="text-[10px] text-rose-400/80 mt-2 font-medium">{{metrics()!.escalation_rate}}% escalation</div>
+    </div>
+
+    <!-- Avg Response Time -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-amber-300 dark:hover:border-amber-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
+      <div class="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+      <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider relative">
+         <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Avg Latency
+      </div>
+      <div class="text-2xl font-extrabold tracking-tight relative" [class]="metrics()!.avg_response_time_ms > 15000 ? 'text-rose-500' : metrics()!.avg_response_time_ms > 8000 ? 'text-amber-500' : 'text-emerald-500'">
+        {{(metrics()!.avg_response_time_ms / 1000).toFixed(1)}}s
+      </div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium relative">{{metrics()!.avg_response_time_ms | number}}ms avg</div>
+    </div>
+
+    <!-- Avg Confidence -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md cursor-pointer">
+      <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+         <span class="w-1.5 h-1.5 rounded-full bg-violet-500"></span> Confidence
+      </div>
+      <div class="text-2xl font-extrabold tracking-tight" [class]="metrics()!.avg_confidence >= 80 ? 'text-emerald-500' : metrics()!.avg_confidence >= 50 ? 'text-amber-500' : 'text-rose-500'">
+        {{metrics()!.avg_confidence}}%
+      </div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium">Avg RAG score</div>
+    </div>
+  </div>
+
+  <!-- Charts Row 1: Performance Timeline + Resolution Breakdown -->
+  <div *ngIf="!isLoading() && metrics()" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 lg:col-span-2 relative overflow-hidden">
+       <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+       <div class="flex justify-between items-center mb-5">
+         <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">System Performance Timeline</h3>
+         <span class="text-[10px] text-slate-400 font-mono">{{metrics()!.time_series.length}} data points</span>
+       </div>
+       <div echarts [options]="areaChart" class="h-[320px]"></div>
+    </div>
+
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 relative overflow-hidden">
+       <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent"></div>
+       <div class="flex justify-between items-center mb-5">
+         <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">Resolution Breakdown</h3>
+       </div>
+       <div echarts [options]="pieChart" class="h-[320px]"></div>
+    </div>
+  </div>
+  <!-- Charts Row 2: Daily Volume + Hourly Traffic -->
+  <div *ngIf="!isLoading() && metrics()" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Daily Query Volume -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent"></div>
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">Daily Query Volume</h3>
+        <span class="text-[10px] text-slate-400 font-mono">{{metrics()!.total_requests | number}} total</span>
+      </div>
+      <div echarts [options]="dailyVolumeChart" class="h-[200px]"></div>
+    </div>
+
+    <!-- Hourly Traffic Heatmap -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-violet-500/50 to-transparent"></div>
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">Hourly Traffic — Today</h3>
+        <span class="text-[10px] text-slate-400 font-mono">24h activity</span>
+      </div>
+      <div echarts [options]="trafficChart" class="h-[200px]"></div>
+    </div>
+  </div>
+</div>
+

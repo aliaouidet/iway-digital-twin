@@ -181,6 +181,7 @@ class AuditLog(Base):
     latency_ms = Column(Integer, nullable=True)
     model_used = Column(String(50), nullable=True)
     confidence = Column(Float, nullable=True)
+    tokens_used = Column(Integer, nullable=True, default=0)
     events = Column(JSONB, nullable=True)  # Full trace event chain
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
