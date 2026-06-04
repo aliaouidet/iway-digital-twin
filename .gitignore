@@ -61,3 +61,6 @@ celerybeat-schedule.*
 celerybeat.pid
 # folders
 .agents
+
+# rapport
+rapport_pfe
