@@ -1,0 +1,47 @@
+# ============================================================
+# Docker build-context excludes — trims image bloat & speeds builds.
+# IMPORTANT: Webservices/ is intentionally NOT ignored — the SOAP WSDLs
+# must be baked into the image (backend/services/iway_soap_client.py loads
+# them from /app/Webservices).
+# ============================================================
+
+# --- Version control ---
+.git/
+.gitattributes
+
+# --- Python venv & caches (host venv is Windows; the image uses /opt/venv) ---
+venv/
+.venv/
+env/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Angular frontend (served by its own `frontend` service, never used by the API image) ---
+iway ui/
+# Defensive fallbacks in case the spaced path above isn't matched by the builder:
+**/node_modules/
+**/.angular/
+**/dist/
+
+# --- Master's thesis report (not needed at runtime) ---
+rapport_pfe/
+
+# --- Local agent / IDE / planning artifacts ---
+.claude/
+.idea/
+.vscode/
+
+# --- Secrets & local runtime artifacts (provided via compose env / bind mount at runtime) ---
+.env
+celerybeat-schedule
+*.db
+*.sqlite3
+*.log
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db

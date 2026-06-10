@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { auditTime } from 'rxjs/operators';
 import { MetricsService } from '../../../core/services/metrics.service';
 import { WebSocketService } from '../../../core/services/websocket.service';
 import { DashboardMetrics } from '../../../shared/models';
@@ -44,7 +45,13 @@ export class DashboardComponent implements OnInit {
     // PostgreSQL is the single source of truth — no partial WS overwrites.
     const refresh = () => this.loadMetrics();
 
-    this.wsService.getMetricUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(refresh);
+    // METRIC_UPDATE is pushed by the backend every ~10s forever — auditTime
+    // caps the refresh (2 HTTP GETs + full chart rebuild) to once per 60s.
+    // Rare, meaningful events (escalation/resolution) still refresh instantly.
+    this.wsService.getMetricUpdates().pipe(
+      auditTime(60_000),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe(refresh);
     this.wsService.getEscalationUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(refresh);
     this.wsService.getSessionUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(event => {
       if (event.type === 'SESSION_RESOLVED') refresh();
@@ -88,7 +95,12 @@ export class DashboardComponent implements OnInit {
   }
 
   private formatDate(d: Date): string {
-    return d.toISOString().split('T')[0];
+    // Local date, NOT toISOString() (UTC) — otherwise "today" selects
+    // yesterday between 00:00 and 01:00 Tunisia time (UTC+1).
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
 
   getTodayStr(): string {

@@ -2,6 +2,7 @@ import { Component, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { environment } from '../../../../environments/environment';
 import { AuthService } from '../../../core/services/auth.service';
 import { ThemeService } from '../../../core/services/theme.service';
 import { IwayLogoComponent } from '../../../shared/components/iway-logo.component';
@@ -54,13 +55,13 @@ import { IwayLogoComponent } from '../../../shared/components/iway-logo.componen
             </button>
           </form>
 
-          <div class="flex items-center gap-3">
+          <div *ngIf="personas.length" class="flex items-center gap-3">
             <div class="flex-1 h-px bg-slate-200 dark:bg-slate-800"></div>
             <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-600">Quick Access</span>
             <div class="flex-1 h-px bg-slate-200 dark:bg-slate-800"></div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
+          <div *ngIf="personas.length" class="grid grid-cols-2 gap-3">
             <button *ngFor="let p of personas" (click)="quickLogin(p.matricule, p.password)"
               class="p-3 rounded-xl border text-left transition-all cursor-pointer group bg-slate-50 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 dark:bg-slate-800/30 dark:border-slate-700/50 dark:hover:border-slate-600 dark:hover:bg-slate-800/50">
               <div class="flex items-center gap-2.5 mb-1">
@@ -84,7 +85,9 @@ export class LoginComponent {
   isLoading = signal(false);
   error = signal('');
 
-  personas = [
+  // Demo quick-login personas — DEV ONLY. Never ship credentials (least of
+  // all the Admin password) in a production bundle.
+  personas = environment.production ? [] : [
     { name: 'Nadia Mansour', role: 'Adherent', matricule: '12345', password: 'pass', initials: 'NM', color: '#6366f1' },
     { name: 'Dr. Amine Zaid', role: 'Prestataire', matricule: '99999', password: 'med', initials: 'AZ', color: '#10b981' },
     { name: 'Karim Belhadj', role: 'Agent', matricule: '88888', password: 'agent', initials: 'KB', color: '#f59e0b' },

@@ -13,6 +13,11 @@ Usage:
     kb_items = await client.get_knowledge_base(token)
 
 Toggle: Set IWAY_USE_REAL_API=true in .env to point at the real API.
+
+NOTE: This REST/httpx client backs the *mock* I-Way backend (iway_mock.py) used in
+development. The production I-Way ERP exposes SOAP/Axis2 services, not REST — those
+are handled by backend/services/iway_soap_client.py, which the graph lookup nodes
+call when IWAY_USE_REAL_API is true.
 """
 
 import logging

@@ -62,5 +62,7 @@ celerybeat.pid
 # folders
 .agents
 
+.Webservices/
+
 # rapport
 rapport_pfe

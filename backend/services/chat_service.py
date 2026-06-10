@@ -352,9 +352,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     cache_hit = False
 
                     # -- TIER 0: Redis Semantic Cache (instant response) --
+                    # Bypassed for personal-data queries: a cached generic answer must
+                    # never shadow a real per-user lookup (see cache_policy.py).
                     try:
                         from backend.services.semantic_cache import check_semantic_cache
-                        cached_text = await check_semantic_cache(content, similarity_threshold=0.95)
+                        from backend.services.cache_policy import is_personal_query
+                        cached_text = None
+                        if not is_personal_query(content):
+                            cached_text = await check_semantic_cache(content, similarity_threshold=0.95)
                         if cached_text:
                             cache_hit = True
                             ai_result = {
@@ -669,16 +674,13 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     trace_store.add(trace)
                     await broadcast_trace(trace)
 
-                    # --- Cache store (only for high-confidence Graph/RAG responses, never degraded/simulated) ---
-                    source = ai_result.get("source", "")
-                    is_cacheable = (
-                        not cache_hit
-                        and ai_result
-                        and ai_result.get("confidence", 0) >= 70
-                        and not ai_result.get("degraded", False)
-                        and source in ("claims_graph", "iway_api", "hitl_validated")
-                    )
-                    if is_cacheable:
+                    # --- Cache store (only high-confidence, user-agnostic knowledge answers) ---
+                    # SECURITY: the shared semantic cache is keyed by query text only, so
+                    # responses built from per-user data (dossiers, remboursements,
+                    # réclamations, claim details) must never be stored — see
+                    # is_cacheable_response() in cache_policy.py.
+                    from backend.services.cache_policy import is_cacheable_response
+                    if is_cacheable_response(ai_result, cache_hit):
                         try:
                             from backend.services.semantic_cache import store_semantic_cache
                             asyncio.create_task(store_semantic_cache(content, ai_result.get("text", "")))

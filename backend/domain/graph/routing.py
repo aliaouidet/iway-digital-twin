@@ -8,12 +8,73 @@ All 4 routing functions that determine which node to execute next:
   - route_by_confidence: draft_response → respond/clarification/handoff
 """
 
+import re
 import logging
-from typing import Literal
+from typing import Literal, Optional
 
 from state import ClaimsGraphState, ClaimIntent
 
 logger = logging.getLogger("I-Way-Twin")
+
+
+# ── Personal-lookup sub-routing (keyword + dossier-number heuristics) ──
+#
+# A PERSONAL_LOOKUP intent fans out to one of four handlers. The decision is
+# deterministic (no LLM): keyword match + a dossier-number probe. Shared by the
+# single-intent `route_action` edge AND the multi-intent executor so both paths
+# behave identically.
+
+_RECLAMATION_KEYWORDS = [
+    "reclamation", "réclamation", "reclamations", "réclamations",
+    "plainte", "contestation", "litige", "reclamer", "réclamer",
+]
+
+_BENEFICIARY_KEYWORDS = [
+    "beneficiaire", "bénéficiaire", "famille", "conjoint", "enfant",
+    "couvert", "ayant", "dependant", "dépendant", "membres",
+]
+
+# Signals that the user wants ONE specific dossier (→ detail), not the list.
+_DETAIL_KEYWORDS = [
+    "detail", "détail", "details", "détails", "dossier", "statut", "suivi",
+    "ou en est", "où en est", "numero", "numéro", "reference", "référence",
+    "etat de", "état de",
+]
+
+# Matches a dossier/reference token: "DOS-2026-0042", "BS123456", or a bare 5+ digit id.
+# Bare numbers need >= 5 digits so years ("2024") and round amounts ("2000 TND")
+# don't masquerade as dossier references.
+_DOSSIER_RE = re.compile(r"\b([A-Za-z]{2,}[-\w]*\d{3,}|\d{5,})\b")
+
+
+def extract_dossier_number(message: str) -> Optional[str]:
+    """Pull a dossier/reference number from free text, or None if absent."""
+    if not message:
+        return None
+    m = _DOSSIER_RE.search(message)
+    return m.group(1) if m else None
+
+
+def classify_personal_lookup(
+    message: str,
+) -> Literal["reclamation_lookup", "dossier_detail_lookup", "beneficiary_lookup", "dossier_lookup"]:
+    """Pick the personal-lookup handler for a message (deterministic).
+
+    Priority: réclamations → specific-dossier detail → bénéficiaires → dossier list.
+    """
+    msg = (message or "").lower()
+
+    if any(kw in msg for kw in _RECLAMATION_KEYWORDS):
+        return "reclamation_lookup"
+
+    # A specific dossier number + a "detail/dossier/statut" cue → single-dossier detail.
+    if any(kw in msg for kw in _DETAIL_KEYWORDS) and extract_dossier_number(message):
+        return "dossier_detail_lookup"
+
+    if any(kw in msg for kw in _BENEFICIARY_KEYWORDS):
+        return "beneficiary_lookup"
+
+    return "dossier_lookup"
 
 
 def pre_intake_router(
@@ -74,6 +135,12 @@ def route_after_decompose(
     sub_intents = state.get("sub_intents", [])
 
     if len(sub_intents) > 1:
+        # An explicit request for a human OUTRANKS the other sub-intents: the
+        # multi-executor cannot run escalation (it would be silently dropped),
+        # so route the whole turn down the escalation path instead.
+        if any(s.get("intent") == "escalation" for s in sub_intents):
+            logger.info("Multi-intent contains escalation -> escalation path dominates")
+            return "escalation"
         logger.info(f"Multi-intent detected ({len(sub_intents)} sub-intents) -> multi_executor")
         return "multi_executor"
 
@@ -83,26 +150,16 @@ def route_after_decompose(
 
 def route_action(
     state: ClaimsGraphState,
-) -> Literal["dossier_lookup", "beneficiary_lookup"]:
+) -> Literal["dossier_lookup", "beneficiary_lookup", "reclamation_lookup", "dossier_detail_lookup"]:
     """
-    Conditional edge after action_router_node.
+    Conditional edge after action_router_node (4-way branch).
 
-    Uses keyword-based routing as a deterministic fallback
-    after LLM classification.
+    Deterministic keyword/number routing of a PERSONAL_LOOKUP to the right
+    handler: dossier list, single-dossier detail, beneficiaries, or réclamations.
     """
-    msg = state["messages"][-1].content.lower()
-
-    beneficiary_keywords = [
-        "beneficiaire", "famille", "conjoint", "enfant",
-        "couvert", "ayant", "contrat", "dependant",
-    ]
-
-    if any(kw in msg for kw in beneficiary_keywords):
-        logger.info("Action route -> beneficiary_lookup")
-        return "beneficiary_lookup"
-    else:
-        logger.info("Action route -> dossier_lookup")
-        return "dossier_lookup"
+    target = classify_personal_lookup(state["messages"][-1].content)
+    logger.info(f"Action route -> {target}")
+    return target
 
 
 def route_by_confidence(

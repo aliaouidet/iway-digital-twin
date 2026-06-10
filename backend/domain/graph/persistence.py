@@ -37,14 +37,26 @@ def _build_postgres_uri() -> str:
     return uri
 
 
+# The context manager returned by from_conn_string() owns the DB connection.
+# It must stay alive for the whole process, so we keep a module-level reference
+# and never exit it (the connection closes with the process).
+_saver_ctx = None
+
+
 async def get_postgres_checkpointer() -> "AsyncPostgresSaver":
     """Create and initialize the production PostgreSQL checkpointer.
 
-    Uses an async connection pool (psycopg_pool.AsyncConnectionPool).
+    NOTE: in current langgraph versions, ``AsyncPostgresSaver.from_conn_string``
+    returns an *async context manager*, not the saver itself — calling
+    ``.setup()`` on it raises ``'_AsyncGeneratorContextManager' object has no
+    attribute 'setup'`` (which silently downgraded the app to MemorySaver).
+    Enter the context to get the real saver.
 
     Returns:
         An initialized AsyncPostgresSaver ready for graph compilation.
     """
+    global _saver_ctx
+
     if not _POSTGRES_AVAILABLE:
         raise RuntimeError(
             "langgraph-checkpoint-postgres is not installed. "
@@ -54,7 +66,8 @@ async def get_postgres_checkpointer() -> "AsyncPostgresSaver":
     uri = _build_postgres_uri()
     logger.info(f"Connecting PostgresSaver to: {uri.split('@')[1]}")
 
-    checkpointer = AsyncPostgresSaver.from_conn_string(uri)
+    _saver_ctx = AsyncPostgresSaver.from_conn_string(uri)
+    checkpointer = await _saver_ctx.__aenter__()
     await checkpointer.setup()  # Idempotent — creates tables if they don't exist
 
     logger.info("PostgresSaver initialized (tables verified)")

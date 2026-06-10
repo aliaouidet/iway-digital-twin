@@ -42,6 +42,9 @@ redis>=5.0.0
 # === HTTP ===
 httpx>=0.27.0
 
+# === SOAP (real I-Way Axis2 web services) ===
+zeep>=4.2.1
+
 # === Auth ===
 bcrypt>=4.0.1
 

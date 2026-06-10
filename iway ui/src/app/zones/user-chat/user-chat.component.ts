@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { retry, timer, Subject, takeUntil, Subscription, EMPTY } from 'rxjs';
+import { retry, timer, Subject, takeUntil, Subscription, EMPTY, defer, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
@@ -376,7 +376,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   private streamingContent = '';
   private destroy$ = new Subject<void>();
   private pingSubscription: Subscription | null = null;
-  private pendingMessage: string | null = null;  // Message waiting for WS to connect
+  private pendingMessages: string[] = [];  // Messages waiting for the WS to (re)connect
+  private authExpired = false;             // Set when the server closes with 4001/4003
 
   quickQuestions = [
     'Plafond soins dentaires ?',
@@ -397,8 +398,15 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   formatMessage(text: string): string {
     if (!text) return '';
+    // SECURITY: escape HTML entities BEFORE the markdown transforms — message
+    // content (user, agent, AI) is untrusted and rendered via [innerHTML].
+    // Angular's sanitizer is a second line of defense, not the only one.
+    let formatted = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
     // Format bold: **text**
-    let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     // Format italic: *text* (only if not already bold)
     formatted = formatted.replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
     // Format lists: * item
@@ -410,7 +418,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   ngOnInit(): void {
     this.checkScreenSize();
-    this.loadChatThreads();
+    // resumeLastActiveChat() also populates chatThreads — no separate
+    // loadChatThreads() call (it would duplicate the same GET).
     this.resumeLastActiveChat();
   }
 
@@ -536,49 +545,55 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   // ─── WebSocket ───
 
-  private connectWebSocket(): void {
-    // Clean up existing connection
-    this.stopPing();
-    if (this.socket$ && !this.socket$.closed) {
-      this.socket$.complete();
-    }
-
+  /** Build the socket fresh — called on every connection attempt so retries
+   *  pick up a re-issued token (e.g. after re-login in another tab). */
+  private createSocket(): WebSocketSubject<any> {
     const token = this.authService.getToken() || '';
     const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${this.sessionId}?token=${token}`;
 
-    this.socket$ = webSocket({
+    const socket: WebSocketSubject<any> = webSocket<any>({
       url: wsUrl,
       deserializer: (e) => JSON.parse(e.data),
       openObserver: {
         next: () => {
           console.log('[UserChat WS] Connection opened, sending user_connect');
           // Send user_connect AFTER the WS is confirmed open
-          this.socket$!.next({ type: 'user_connect' });
+          socket.next({ type: 'user_connect' });
           // Start heartbeat
           this.startPing();
-          // Flush any pending message that was waiting for connection
-          if (this.pendingMessage) {
-            const msg = this.pendingMessage;
-            this.pendingMessage = null;
-            setTimeout(() => {
-              this.socket$?.next({ type: 'user_message', content: msg });
-            }, 300);
-          }
         }
       },
       closeObserver: {
-        next: () => {
-          console.log('[UserChat WS] Connection closed');
+        next: (event: CloseEvent) => {
+          console.log('[UserChat WS] Connection closed', event.code);
           this.isConnected.set(false);
           this.stopPing();
+          // 4001/4003 = backend rejected the token — retrying is pointless
+          if (event.code === 4001 || event.code === 4003) {
+            this.authExpired = true;
+          }
         }
       }
     });
+    this.socket$ = socket;
+    return socket;
+  }
 
-    this.socket$.pipe(
+  private connectWebSocket(): void {
+    // Clean up existing connection
+    this.stopPing();
+    if (this.socket$ && !this.socket$.closed) {
+      this.socket$.complete();
+    }
+    this.authExpired = false;
+
+    defer(() => this.createSocket()).pipe(
       retry({
         count: 5,
         delay: (error, retryCount) => {
+          if (this.authExpired) {
+            return throwError(() => new Error('auth_expired'));
+          }
           const delayMs = Math.min(2000 * Math.pow(2, retryCount - 1), 30000);
           console.log(`[UserChat WS] Reconnecting in ${delayMs}ms (attempt ${retryCount})...`);
           return timer(delayMs);
@@ -588,6 +603,14 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       catchError(err => {
         console.error('[UserChat WS] Fatal error:', err);
         this.isConnected.set(false);
+        this.socket$ = null;   // allow a later sendMessage() to reconnect
+        if (this.authExpired) {
+          this.toastService.show('Session expirée. Veuillez vous reconnecter.', 'error');
+          this.authService.logout();
+          this.router.navigate(['/login']);
+        } else {
+          this.toastService.show('Connexion perdue. Votre message sera envoyé à la reconnexion.', 'error');
+        }
         return EMPTY;
       }),
       takeUntil(this.destroy$)
@@ -596,6 +619,16 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       error: (err) => { console.error('[UserChat WS] Stream error:', err); this.isConnected.set(false); },
       complete: () => this.isConnected.set(false),
     });
+  }
+
+  /** Send everything queued while we were disconnected (after backend confirms the bind). */
+  private flushPendingMessages(): void {
+    if (!this.pendingMessages.length) return;
+    console.log(`[UserChat WS] Flushing ${this.pendingMessages.length} queued message(s)`);
+    for (const content of this.pendingMessages) {
+      this.socket$?.next({ type: 'user_message', content });
+    }
+    this.pendingMessages = [];
   }
 
   /** Start periodic PING heartbeat to keep the connection alive */
@@ -623,6 +656,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       case 'connected':
         console.log('[UserChat WS] ← connected event received');
         this.isConnected.set(true);
+        this.flushPendingMessages();
         break;
       case 'history':
         console.log(`[UserChat WS] ← history: ${msg.messages?.length ?? 0} messages`);
@@ -667,17 +701,21 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         const updated = this.messages();
         const lastMsg = updated[updated.length - 1];
         if (lastMsg?.isStreaming) {
-          // Happy path: finalize the streaming message
+          // Finalize the streaming bubble. ai_done.text is the AUTHORITATIVE
+          // final answer (PII-restored, compliance-redacted server-side) — it
+          // must REPLACE the raw streamed content, which may contain [PII_n]
+          // placeholders or internal artifacts when the backend streamed the
+          // structured-output fallback path.
           this.messages.set([...updated.slice(0, -1), {
             ...lastMsg,
+            content: msg.text || lastMsg.content,
             isStreaming: false,
             is_handoff_ai: msg.is_handoff_ai || false,
             confidence: msg.confidence,
           }]);
         } else if (msg.text) {
-          // Fallback: tokens were lost (WS reconnect, timing issue)
-          // Use the full response text from ai_done payload
-          console.warn('[UserChat WS] ⚠ Tokens lost — using ai_done text fallback');
+          // No streaming bubble (the normal graph path streams no tokens):
+          // append the full response from ai_done.
           this.messages.update(msgs => [...msgs, {
             role: 'assistant',
             content: msg.text,
@@ -739,7 +777,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
         next: (res) => {
           this.sessionId = res.session_id;
-          this.pendingMessage = content;  // Queue the message for after WS connects
+          this.pendingMessages.push(content);  // Queue the message for after WS connects
           this.connectWebSocket();
           this.loadChatThreads();
         },
@@ -754,7 +792,16 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
     // Normal path: session already exists
     this.messages.update(m => [...m, { role: 'user', content }]);
-    this.socket$?.next({ type: 'user_message', content });
+    if (this.socket$ && this.isConnected()) {
+      this.socket$.next({ type: 'user_message', content });
+    } else {
+      // Socket dead or still connecting — never drop silently: queue the
+      // message (flushed on 'connected') and re-establish if needed.
+      this.pendingMessages.push(content);
+      if (!this.socket$) {
+        this.connectWebSocket();
+      }
+    }
   }
 
   sendQuickQuestion(q: string): void {

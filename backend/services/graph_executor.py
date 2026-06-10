@@ -87,6 +87,8 @@ _NODE_LABELS = {
     "multi_executor": "Traitement de vos demandes...",
     "dossier_lookup": "Consultation de vos dossiers...",
     "beneficiary_lookup": "Vérification de vos bénéficiaires...",
+    "reclamation_lookup": "Consultation de vos réclamations...",
+    "dossier_detail_lookup": "Recherche du détail de votre dossier...",
     "draft_response": "Rédaction de la réponse...",
     "clarification": "Vérification des informations...",
     "handoff": "Transfert vers un superviseur...",
@@ -117,9 +119,12 @@ async def execute_claims_graph(
         return None  # Signal caller to use RAG fallback
 
     # -- Construct initial state --
+    # NOTE: matricule deliberately defaults to "" (not a demo persona). With real
+    # ERP writes wired, a missing matricule must never attribute records to a
+    # real-looking user — empty matricule disables writes and personal lookups.
     initial_state = {
         "messages": [HumanMessage(content=query)],
-        "matricule": session.get("user_matricule", "12345"),
+        "matricule": session.get("user_matricule", ""),
         "token": session.get("user_token", ""),
         "claim_status": _map_session_to_claim_status(session),
     }
@@ -196,13 +201,21 @@ async def execute_claims_graph(
                     
                 sub_spans.append({"name": name, "duration_ms": round(duration_ms, 1)})
 
-        # Use the streamed full_response, or fall back to the graph's final message
-        if not full_response.strip():
-            messages = state_values.get("messages", [])
-            if messages:
-                last_msg = messages[-1]
-                if hasattr(last_msg, "content"):
-                    full_response = last_msg.content
+        # Prefer the graph's CANONICAL final text (respond_node's AIMessage) over
+        # the raw streamed chunks. The canonical text is PII-restored and
+        # compliance-redacted; raw streamed chunks may still contain [PII_n]
+        # placeholders (or the CONFIDENCE: line) when the structured-output
+        # fallback path streamed plain text. The UI's final bubble uses the
+        # `ai_done.text` built from this return value, so the corrected text
+        # replaces whatever was streamed live.
+        canonical = ""
+        messages = state_values.get("messages", [])
+        if messages:
+            last_msg = messages[-1]
+            if getattr(last_msg, "type", "") == "ai" and getattr(last_msg, "content", ""):
+                canonical = last_msg.content
+        if canonical.strip():
+            full_response = canonical
 
         if full_response.strip():
             return {

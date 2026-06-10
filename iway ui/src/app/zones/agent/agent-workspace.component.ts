@@ -5,7 +5,8 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { Subscription } from 'rxjs';
+import { Subscription, defer, timer, throwError, EMPTY } from 'rxjs';
+import { retry, catchError } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
 import { ThemeService } from '../../core/services/theme.service';
@@ -670,7 +671,11 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   selectSession(item: QueueItem): void {
     this.activeSession.set(item);
-    this.hasTakenOver.set(item.status === 'agent_connected');
+    // "Taken over" (chat input shown) only applies to THIS agent's sessions —
+    // another agent's active session is view-only here.
+    const isMine = item.status === 'agent_connected'
+      && item.agent_matricule === this.currentAgentMatricule;
+    this.hasTakenOver.set(isMine);
     this.showBriefing.set(false);
     this.briefing.set(null);
     this.showClarifyInput.set(false);
@@ -678,6 +683,12 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.loadHistory(item.id);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
+
+    // Re-selecting a session we already own must re-open the chat socket,
+    // otherwise the input is visible but sends go nowhere.
+    if (isMine) {
+      this.connectToSessionWs(item.id);
+    }
     this.closeSidebarOnMobile();
 
     // Auto-load briefing for pending sessions
@@ -777,24 +788,54 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   private connectToSessionWs(sessionId: string): void {
-    const token = this.authService.getToken();
-    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${sessionId}?token=${token}`;
-    this.sessionSocket$ = webSocket({ url: wsUrl, deserializer: (e) => JSON.parse(e.data) });
+    // Built fresh per attempt so reconnects pick up a re-issued token.
+    const createSocket = () => {
+      const token = this.authService.getToken();
+      const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${sessionId}?token=${token}`;
+      const socket: WebSocketSubject<any> = webSocket<any>({
+        url: wsUrl,
+        deserializer: (e) => JSON.parse(e.data),
+        openObserver: {
+          next: () => socket.next({ type: 'agent_connect' })
+        },
+      });
+      this.sessionSocket$ = socket;
+      return socket;
+    };
 
-    this.sessionSocket$.subscribe({
-      next: (msg) => {
+    defer(createSocket).pipe(
+      retry({
+        count: 5,
+        delay: (error, retryCount) => {
+          const delayMs = Math.min(2000 * Math.pow(2, retryCount - 1), 30000);
+          console.log(`[Agent WS] Reconnecting in ${delayMs}ms (attempt ${retryCount})...`);
+          return timer(delayMs);
+        },
+        resetOnSuccess: true,
+      }),
+      catchError(err => {
+        console.error('[Agent WS] Fatal error:', err);
+        this.sessionSocket$ = null;
+        this.toastService.show('Connexion à la session perdue — re-sélectionnez la session.', 'error');
+        return EMPTY;
+      }),
+    ).subscribe({
+      next: (msg: any) => {
         if (msg.type === 'user_message') {
           this.chatHistory.update(h => [...h, { role: 'user', content: msg.content, timestamp: msg.timestamp }]);
           setTimeout(() => this.scrollChat(), 50);
         }
       }
     });
-
-    this.sessionSocket$.next({ type: 'agent_connect' });
   }
 
   sendAgentMessage(): void {
-    if (!this.agentMessage.trim() || !this.sessionSocket$) return;
+    if (!this.agentMessage.trim()) return;
+    if (!this.sessionSocket$) {
+      // Never fail silently — the agent must know the message did not go out.
+      this.toastService.show('Connexion à la session inactive — re-sélectionnez la session.', 'error');
+      return;
+    }
     const content = this.agentMessage.trim();
     this.agentMessage = '';
     this.chatHistory.update(h => [...h, { role: 'agent', content }]);

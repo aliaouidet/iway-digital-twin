@@ -42,6 +42,10 @@ schema = IndexSchema.from_dict({
 
 _index: Optional[SearchIndex] = None
 
+# Cache policy (what is safe to cache) lives in cache_policy.py — re-exported here
+# for convenience. SECURITY: per-user responses are never cacheable. See that module.
+from backend.services.cache_policy import is_cacheable_response  # noqa: E402,F401
+
 def get_cache_index() -> Optional[SearchIndex]:
     """Lazy initialize the RedisVL index."""
     global _index
@@ -67,9 +71,11 @@ async def check_semantic_cache(query: str, similarity_threshold: float = 0.95) -
         return None
 
     try:
-        # Generate embedding for the query
-        # Generate embedding for the query
-        vector = embed_text(query)
+        # Embed in a worker thread — sentence-transformers is CPU-bound and
+        # would otherwise block the event loop (stalling ALL requests) for the
+        # duration of the encode (seconds, on a cold model).
+        import anyio
+        vector = await anyio.to_thread.run_sync(embed_text, query)
 
         # Build vector query
         v_query = VectorQuery(
@@ -104,8 +110,9 @@ async def store_semantic_cache(query: str, response: str):
         return
 
     try:
-        vector = embed_text(query)
-        
+        import anyio
+        vector = await anyio.to_thread.run_sync(embed_text, query)
+
         import numpy as np
         vector_bytes = np.array(vector, dtype=np.float32).tobytes()
         

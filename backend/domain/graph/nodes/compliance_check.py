@@ -91,6 +91,14 @@ async def compliance_check_node(state: ClaimsGraphState) -> dict:
         except ValueError:
             pass
 
+    # ── Check 2b: Currency Consistency ────────────────────────
+    # The domain is Tunisian health insurance — all amounts are TND. The LLM
+    # occasionally appends € to unitless amounts; flag it so the
+    # self-correction loop rewrites the response.
+    if re.search(r"\d\s*(?:€|\$|EUR\b|USD\b)", draft):
+        compliance_notes.append("⚠️ CURRENCY: Devise étrangère (€/$) détectée — les montants sont en TND")
+        penalty += 0.05
+
     # ── Check 3: Phone Number Consistency ─────────────────────
     phone_pattern = re.findall(r"\b\d{2}\s?\d{3}\s?\d{3}\b", draft)
     for phone in phone_pattern:

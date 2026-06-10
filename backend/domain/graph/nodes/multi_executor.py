@@ -18,18 +18,41 @@ from state import ClaimsGraphState
 logger = logging.getLogger("I-Way-Twin")
 
 
-async def _execute_personal_lookup(state: ClaimsGraphState) -> dict:
-    """Execute a personal_lookup sub-intent (dossier or beneficiary)."""
+async def _execute_personal_lookup(state: ClaimsGraphState, query: str) -> dict:
+    """Execute a personal_lookup sub-intent.
+
+    Uses the same deterministic classifier as the single-intent `route_action`
+    edge to pick the right handler (dossier list / dossier detail / beneficiaries
+    / réclamations) based on the SUB-query text — so multi-intent queries like
+    "liste mes réclamations et le plafond dentaire" route correctly.
+    """
+    from langchain_core.messages import HumanMessage
+    from backend.domain.graph.routing import classify_personal_lookup
     from backend.domain.graph.nodes.lookups import (
         dossier_lookup_node,
         beneficiary_lookup_node,
+        reclamation_lookup_node,
+        dossier_detail_lookup_node,
     )
 
-    # Default to dossier lookup — covers "mes dossiers", "remboursements", etc.
-    # For the multi-intent case, we skip the LLM-based action_router to save
-    # latency and default to dossier (the most common personal_lookup).
-    result = await dossier_lookup_node(state)
-    logger.info(f"Personal lookup executed: {list(result.get('system_records', {}).keys())}")
+    handlers = {
+        "dossier_lookup": dossier_lookup_node,
+        "beneficiary_lookup": beneficiary_lookup_node,
+        "reclamation_lookup": reclamation_lookup_node,
+        "dossier_detail_lookup": dossier_detail_lookup_node,
+    }
+    target = classify_personal_lookup(query)
+    node = handlers[target]
+
+    # The lookup nodes read the LAST message; in a multi-intent prompt that's the
+    # full text, so scope it to the sub-query (matters for dossier-number parsing).
+    scoped_state = dict(state)
+    scoped_state["messages"] = list(state["messages"][:-1]) + [HumanMessage(content=query)]
+
+    result = await node(scoped_state)
+    logger.info(
+        f"Personal lookup ({target}) executed: {list(result.get('system_records', {}).keys())}"
+    )
     return result
 
 
@@ -97,7 +120,7 @@ async def multi_executor_node(state: ClaimsGraphState) -> dict:
         query = sub.get("query", "")
 
         if intent == "personal_lookup":
-            tasks.append(_execute_personal_lookup(state))
+            tasks.append(_execute_personal_lookup(state, query))
             task_labels.append(f"personal_lookup")
 
         elif intent == "info_query":

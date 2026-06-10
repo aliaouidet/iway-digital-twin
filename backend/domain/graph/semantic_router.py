@@ -95,12 +95,15 @@ INTENT_EXAMPLES = {
         "Acte médical du 10 avril à rembourser",
         "Combien vais-je être remboursé pour cette facture ?",
         "J'ai une ordonnance à transmettre",
-        "Je souhaite vérifier le statut de mon remboursement",
-        "Ma demande de remboursement est en cours ?",
     ],
     "personal_lookup": [
         "Quels sont mes dossiers ?",
         "Montre-moi mes bénéficiaires",
+        # Status checks on EXISTING reimbursements are lookups, not claim
+        # submissions — keeping them here prevents misrouting to claim_extraction.
+        "Je souhaite vérifier le statut de mon remboursement",
+        "Ma demande de remboursement est en cours ?",
+        "Montre-moi mes remboursements",
         "Quel est l'état de mon dossier ?",
         "Liste mes remboursements en cours",
         "Qui sont mes ayants droit ?",
@@ -119,6 +122,13 @@ INTENT_EXAMPLES = {
         "Afficher mes garanties actives",
         "Historique de mes sinistres",
         "Mes documents récents",
+        "Où en sont mes réclamations ?",
+        "Quel est le statut de ma réclamation ?",
+        "Liste mes réclamations",
+        "Mes réclamations en cours",
+        "Suivi de ma réclamation",
+        "Détail du dossier DOS-2026-0042",
+        "Où en est mon dossier de remboursement ?",
     ],
     "escalation": [
         "Je veux parler à un humain",

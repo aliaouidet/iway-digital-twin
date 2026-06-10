@@ -1,8 +1,9 @@
 import { Injectable, OnDestroy, signal } from '@angular/core';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { Observable, Subject, EMPTY, timer } from 'rxjs';
-import { catchError, filter, map, retry, share, switchMap, takeUntil } from 'rxjs/operators';
+import { Observable, Subject, Subscription, EMPTY, timer, defer, throwError } from 'rxjs';
+import { catchError, filter, map, retry, takeUntil } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
+import { AuthService } from './auth.service';
 import { RealtimeMetricUpdate } from '../../shared/models';
 import { QueueItem } from '../../shared/models/chat.interface';
 
@@ -16,34 +17,56 @@ export class WebSocketService implements OnDestroy {
   private socket$: WebSocketSubject<WsMessage> | null = null;
   private destroy$ = new Subject<void>();
   private messages$ = new Subject<WsMessage>();
+  private pingSub: Subscription | null = null;
+  private authExpired = false;
   private _sidebarQueue = signal<QueueItem[]>([]);
   public sidebarQueue = this._sidebarQueue.asReadonly();
+
+  constructor(private authService: AuthService) {}
+
+  /** Built fresh per connection attempt so retries pick up a re-issued token. */
+  private createSocket(fallbackToken?: string): WebSocketSubject<WsMessage> {
+    const token = this.authService.getToken() || fallbackToken;
+    const wsUrl = token ? `${environment.wsUrl}?token=${token}` : environment.wsUrl;
+
+    const socket = webSocket<WsMessage>({
+      url: wsUrl,
+      openObserver: {
+        next: () => console.log('[WebSocket] Connected')
+      },
+      closeObserver: {
+        next: (event: CloseEvent) => {
+          console.log('[WebSocket] Connection closed', event.code);
+          // 4001/4003 = token rejected — retrying with it is pointless. The
+          // next REST call will 401 and the interceptor handles the redirect.
+          if (event.code === 4001 || event.code === 4003) {
+            this.authExpired = true;
+          }
+        }
+      }
+    });
+    this.socket$ = socket;
+    return socket;
+  }
 
   connect(token?: string): void {
     if (this.socket$ && !this.socket$.closed) {
       return;
     }
+    this.authExpired = false;
 
-    const wsUrl = token ? `${environment.wsUrl}?token=${token}` : environment.wsUrl;
-
-    this.socket$ = webSocket<WsMessage>({
-      url: wsUrl,
-      openObserver: {
-        next: () => console.log('[WebSocket] Connected to', wsUrl)
-      },
-      closeObserver: {
-        next: () => console.log('[WebSocket] Connection closed')
-      }
-    });
-
-    this.socket$.pipe(
+    defer(() => this.createSocket(token)).pipe(
       retry({ count: 10, delay: (error, retryCount) => {
+        if (this.authExpired) {
+          return throwError(() => new Error('auth_expired'));
+        }
         const delayMs = Math.min(1000 * Math.pow(2, retryCount), 30000);
         console.log(`[WebSocket] Reconnecting in ${delayMs}ms (attempt ${retryCount})...`);
         return timer(delayMs);
       }}),
       catchError(err => {
         console.error('[WebSocket] Fatal error:', err);
+        this.socket$ = null;   // a later connect() can re-establish
         return EMPTY;
       }),
       takeUntil(this.destroy$)
@@ -53,15 +76,20 @@ export class WebSocketService implements OnDestroy {
         this.handleSidebarUpdates(msg);
       },
       error: (err) => console.error('[WebSocket] Stream error:', err),
+      complete: () => { this.socket$ = null; },
     });
 
-    // Send periodic pings
-    timer(30000, 30000).pipe(
+    // Send periodic pings — one timer per connection (cleared in disconnect()),
+    // otherwise each connect() after a disconnect() leaks an extra interval.
+    this.pingSub?.unsubscribe();
+    this.pingSub = timer(30000, 30000).pipe(
       takeUntil(this.destroy$)
     ).subscribe(() => this.sendMessage({ type: 'PING', payload: null }));
   }
 
   disconnect(): void {
+    this.pingSub?.unsubscribe();
+    this.pingSub = null;
     if (this.socket$) {
       this.socket$.complete();
       this.socket$ = null;

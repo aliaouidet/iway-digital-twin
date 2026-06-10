@@ -3,16 +3,54 @@
 # Enterprise-grade local development environment
 # ============================================================
 # Usage:
-#   docker compose up -d          # Start all services
-#   docker compose logs -f api    # Follow API logs
-#   docker compose down -v        # Stop + remove volumes
-#   docker compose restart        # Restart all services
+#   docker compose up -d --build   # First run / after a dependency change
+#   docker compose up -d           # Day-to-day (code hot-reloads via the bind mount)
+#   docker compose logs -f api     # Follow API logs
+#   docker compose down -v         # Stop + remove volumes
+#
+# The 4 Python services (api/worker/beat/flower) all run the SAME image
+# (iway-twin:latest, built once) with different commands — see the &app-image
+# anchor. Shared env and log limits are defined once via anchors too.
 #
 # Monitoring UIs:
-#   Flower       → http://localhost:5555  (Celery tasks)
-#   pgAdmin      → http://localhost:5050  (PostgreSQL)
-#   RedisInsight → http://localhost:5540  (Redis)
+#   Flower → :5555   pgAdmin → :5051   RedisInsight → :5540   Jaeger → :16686
 # ============================================================
+
+# --- Reusable building blocks (YAML anchors) ----------------------------------
+x-app-image: &app-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: iway-twin:latest          # one image, reused by all 4 Python services
+
+x-app-env: &app-env                # shared env for api + worker (the data-layer services)
+  DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
+  REDIS_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/0
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
+  IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
+  IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
+  IWAY_API_KEY: ${IWAY_API_KEY:-}
+  # Real I-Way SOAP services (live calls need the company LAN; WSDLs bundled in ./Webservices)
+  IWAY_SOAP_BASE_URL: ${IWAY_SOAP_BASE_URL:-http://192.168.111.102:8080/axis2/services}
+  IWAY_SOAP_LOAD_LOCAL_WSDL: ${IWAY_SOAP_LOAD_LOCAL_WSDL:-true}
+  IWAY_SOAP_USER: ${IWAY_SOAP_USER:-admin}
+  IWAY_SOAP_PASSWORD: ${IWAY_SOAP_PASSWORD:-admin}
+  IWAY_SOAP_TIMEOUT: ${IWAY_SOAP_TIMEOUT:-15}
+  IWAY_SOAP_CONNECT_TIMEOUT: ${IWAY_SOAP_CONNECT_TIMEOUT:-5}
+  OLLAMA_BASE_URL: http://ollama:11434/v1
+  GCP_PROJECT_ID: ${GCP_PROJECT_ID:-caramel-medley-407500}
+  GCP_LOCATION: ${GCP_LOCATION:-us-central1}
+  GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
+  DB_HOST: db
+
+x-logging: &default-logging        # cap container logs so they never fill the disk
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
 
@@ -35,6 +73,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
+    logging: *default-logging
     restart: unless-stopped
 
   # --- Redis Stack (pub/sub, semantic cache, Celery broker) ---
@@ -52,33 +91,19 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    logging: *default-logging
     restart: unless-stopped
 
   # --- FastAPI Backend ---
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     container_name: iway-api
     user: root
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     environment:
-      DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
-      REDIS_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
+      <<: *app-env
       MOCK_SERVER_URL: http://localhost:8000
-      IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
-      IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
-      IWAY_API_KEY: ${IWAY_API_KEY:-}
-      OLLAMA_BASE_URL: http://ollama:11434/v1
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-caramel-medley-407500}
-      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
-      GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
-      DB_HOST: db
     ports:
       - "8000:8000"
     volumes:
@@ -90,31 +115,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
   # --- Celery Worker (background tasks: sync, embedding) ---
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     container_name: iway-worker
     user: root
     command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2
     environment:
-      DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
-      REDIS_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/2
-      IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
-      IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
-      IWAY_API_KEY: ${IWAY_API_KEY:-}
-      OLLAMA_BASE_URL: http://ollama:11434/v1
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-caramel-medley-407500}
-      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
-      GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
-      DB_HOST: db
+      <<: *app-env
     volumes:
       - .:/app
       - hf_cache:/root/.cache/huggingface
@@ -124,13 +135,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
   # --- Celery Beat (periodic task scheduler) ---
   beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     container_name: iway-beat
     user: root
     command: celery -A backend.workers.celery_app beat --loglevel=info
@@ -143,19 +153,16 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
   # ============================================================
   # MONITORING STACK
   # ============================================================
 
-  # --- Flower (Celery Monitoring) ---
-  # URL: http://localhost:5555
-  # Shows: active tasks, worker status, task history, queues, graphs
+  # --- Flower (Celery Monitoring) ---  URL: http://localhost:5555
   flower:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     container_name: iway-flower
     user: root
     command: celery -A backend.workers.celery_app flower --port=5555 --broker_api=redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/1 --persistent=True --db=/data/flower.db
@@ -171,12 +178,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
-  # --- pgAdmin (PostgreSQL Monitoring & Administration) ---
-  # URL: http://localhost:5050
-  # Login: admin@iway.tn / admin
-  # Shows: query tool, table browser, server activity, dashboard graphs
+  # --- pgAdmin (PostgreSQL Monitoring) ---  URL: http://localhost:5051 (admin@iway.tn / admin)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: iway-pgadmin
@@ -194,11 +199,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
-  # --- RedisInsight (Redis Monitoring) ---
-  # URL: http://localhost:5540
-  # Shows: key browser, memory analysis, slow log, streams, pub/sub
+  # --- RedisInsight (Redis Monitoring) ---  URL: http://localhost:5540
   redisinsight:
     image: redis/redisinsight:latest
     container_name: iway-redisinsight
@@ -209,11 +213,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
-  # --- Jaeger (OpenTelemetry Distributed Tracing) ---
-  # URL: http://localhost:16686
-  # Shows: Request traces, parallel execution spans, flame graphs
+  # --- Jaeger (OpenTelemetry Distributed Tracing) ---  URL: http://localhost:16686
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: iway-jaeger
@@ -222,6 +225,7 @@ services:
     ports:
       - "16686:16686" # Web UI
       - "4317:4317" # OTLP gRPC receiver
+    logging: *default-logging
     restart: unless-stopped
 
   # --- Angular Frontend (Development Server) ---
@@ -237,7 +241,9 @@ services:
       - "4200:4200"
     depends_on:
       - api
+    logging: *default-logging
     restart: unless-stopped
+
   # --- Ollama (Local LLM Serving) ---
   # Uncomment and configure GPU passthrough for local LLM support
   # ollama:

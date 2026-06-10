@@ -45,9 +45,9 @@ Analyse le dernier message de l'utilisateur et decompose-le en sous-requetes IND
 
 CATEGORIES DISPONIBLES:
 1. "info_query" — Questions sur les regles, plafonds, delais, procedures d'assurance, numeros de support.
-2. "claim_action" — Soumettre ou verifier un remboursement specifique (montants, factures, actes medicaux).
-3. "escalation" — Utilisateur mecontent ou demande explicitement un agent humain.
-4. "personal_lookup" — Consulter ses donnees personnelles (dossiers, beneficiaires, historique, remboursements).
+2. "claim_action" — Soumettre une NOUVELLE demande de remboursement (montants, factures, actes medicaux a declarer). (Verifier/suivre un remboursement deja soumis = "personal_lookup".)
+3. "escalation" — Utilisateur mecontent, demande explicitement un agent humain, ou veut DEPOSER une nouvelle reclamation. (Demander le STATUT d'une reclamation existante = "personal_lookup", PAS "escalation".)
+4. "personal_lookup" — Consulter ses donnees personnelles (dossiers, beneficiaires, historique, remboursements, statut/suivi de ses reclamations existantes, detail d'un dossier precis).
 5. "small_talk" — Salutations, remerciements, politesses sans requete specifique.
 
 REGLES:
@@ -60,7 +60,8 @@ REGLES:
 Exemples:
 - "Bonjour" -> [{"intent": "small_talk", "query": "Bonjour"}]
 - "Quels sont mes dossiers ?" -> [{"intent": "personal_lookup", "query": "Quels sont mes dossiers ?"}]
-- "Liste mes dossiers et donne-moi le plafond dentaire" -> [{"intent": "personal_lookup", "query": "Liste mes dossiers"}, {"intent": "info_query", "query": "Quel est le plafond dentaire ?"}]"""
+- "Liste mes dossiers et donne-moi le plafond dentaire" -> [{"intent": "personal_lookup", "query": "Liste mes dossiers"}, {"intent": "info_query", "query": "Quel est le plafond dentaire ?"}]
+- "Ou en sont mes reclamations ?" -> [{"intent": "personal_lookup", "query": "Ou en sont mes reclamations ?"}]"""
 
 
 # Map string -> enum
@@ -93,7 +94,10 @@ async def decompose_node(state: ClaimsGraphState) -> dict:
     # classify intent without an LLM call. Only falls back to the
     # LLM decomposer when uncertain or message may be multi-intent.
     word_count = len(user_text.split())
-    router_intent, router_confidence = classify_intent(user_text)
+    # classify_intent embeds the text (CPU-bound) — run off the event loop so
+    # other sessions aren't stalled while this one is classified.
+    import anyio
+    router_intent, router_confidence = await anyio.to_thread.run_sync(classify_intent, user_text)
 
     if router_intent is not None and router_confidence >= 0.80 and word_count <= 20:
         # High-confidence single-intent — skip LLM entirely

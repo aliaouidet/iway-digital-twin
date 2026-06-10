@@ -7,6 +7,8 @@ from backend.domain.graph.nodes.claim_extraction import claim_extraction_node
 from backend.domain.graph.nodes.lookups import (
     dossier_lookup_node,
     beneficiary_lookup_node,
+    reclamation_lookup_node,
+    dossier_detail_lookup_node,
     action_router_node,
 )
 from backend.domain.graph.nodes.respond import respond_node
@@ -25,6 +27,8 @@ __all__ = [
     "claim_extraction_node",
     "dossier_lookup_node",
     "beneficiary_lookup_node",
+    "reclamation_lookup_node",
+    "dossier_detail_lookup_node",
     "action_router_node",
     "multi_executor_node",
     "draft_response_node",

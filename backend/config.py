@@ -29,6 +29,21 @@ class Settings(BaseSettings):
     IWAY_API_BASE_URL: str = "http://localhost:8000"  # Override with real URL
     IWAY_API_KEY: str = ""                 # If I-Way uses API key auth
 
+    # --- I-Way Real API (SOAP / Axis2 web services) ---
+    # The real I-Way ERP exposes Apache Axis2 SOAP services (not REST). When
+    # IWAY_USE_REAL_API is true, personal-record lookups (contrat, remboursements,
+    # réclamations, bénéficiaires) are served by backend/services/iway_soap_client.py.
+    # NOTE: live calls only succeed on the company LAN; the WSDLs are bundled locally
+    # (IWAY_SOAP_WSDL_DIR) so the client builds/validates fully offline.
+    IWAY_SOAP_BASE_URL: str = "http://192.168.111.102:8080/axis2/services"
+    IWAY_SOAP_WSDL_DIR: str = ""           # Abs path to bundled WSDLs; defaults to <repo>/Webservices
+    IWAY_SOAP_LOAD_LOCAL_WSDL: bool = True # Build clients from local WSDL files (offline-safe)
+    IWAY_SOAP_USER: str = "admin"          # HTTP Basic auth (Axis2 container)
+    IWAY_SOAP_PASSWORD: str = "admin"
+    IWAY_SOAP_TIMEOUT: int = 15            # Per-call read timeout (seconds)
+    IWAY_SOAP_CONNECT_TIMEOUT: int = 5     # TCP connect timeout — short, so an
+                                           # unreachable ERP degrades in seconds, not 30+
+
     # --- JWT ---
     JWT_ALGORITHM: str = "RS256"
     JWT_EXPIRATION_MINUTES: int = 60

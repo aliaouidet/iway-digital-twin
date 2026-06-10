@@ -1,68 +1,72 @@
 # ==============================================================================
-# STAGE 1: Builder
+# STAGE 1: Builder — compiles all Python deps into an isolated venv (/opt/venv)
 # ==============================================================================
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-# Set environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies required for compilation (e.g., C extensions for pgvector/psycopg)
+# Build toolchain for C extensions (psycopg / pgvector). Builder-only — not shipped.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create and activate a virtual environment
+# Isolated venv so the runtime stage can copy a single self-contained tree.
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy and install Python dependencies into the venv
-COPY requirements.txt .
+# --- Layer 1 (STABLE): pip + CPU-only torch ---------------------------------
+# torch is large and rarely changes, and is NOT in requirements.txt. Installing it
+# in its own layer means editing requirements.txt does NOT re-run this step.
+# The pip cache mount keeps wheels between builds (no re-download).
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
-    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# --- Layer 2 (VOLATILE): application dependencies ---------------------------
+# Copied separately so this is the ONLY layer that re-runs when a dependency
+# changes — and thanks to the pip cache mount it only downloads the new wheel
+# (e.g. adding `zeep` won't re-fetch the rest).
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
-# Pre-download the embedding model so it's baked into the image
-RUN python -c "\
-from sentence_transformers import SentenceTransformer;\
-SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')\
-"
+# NOTE: the embedding model is intentionally NOT pre-downloaded here. The runtime
+# mounts a persistent `hf_cache` volume (see docker-compose.yml), so the model is
+# fetched once on first startup and cached across restarts — baking it into the
+# image would be discarded by that volume mount and only bloats the build.
 
 # ==============================================================================
-# STAGE 2: Runtime
+# STAGE 2: Runtime — slim image with only the venv + app code
 # ==============================================================================
 FROM python:3.11-slim AS runtime
 
-# Set environment variables for the runtime stage
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-# Install minimal runtime system dependencies (libpq5 for PostgreSQL)
+# Runtime-only system lib for PostgreSQL (no compiler toolchain shipped).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user for security best practices
+# Non-root user (compose may override to root for the bind-mount dev workflow).
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Copy the compiled virtual environment from the builder
+# Pull in the fully-built venv from the builder stage.
 COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 
-# Copy the application code
+# Application code (build context trimmed by .dockerignore).
 COPY --chown=appuser:appuser . .
 
-# Switch to the non-root user
 USER appuser
 
-# Expose port
 EXPOSE 8000
 
-# Default command: run FastAPI with uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

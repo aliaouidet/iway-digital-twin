@@ -75,6 +75,18 @@ async def lifespan(app: FastAPI):
     logger.info("🧠 Initializing Claims StateGraph...")
     await init_claims_graph_async()
 
+    # --- Semantic router warm-up ---
+    # The router embeds its ~100 exemplar utterances lazily on first use, which
+    # costs ~30s on CPU — warm it here so the first user message isn't the one
+    # paying for it.
+    try:
+        import anyio
+        from backend.domain.graph.semantic_router import classify_intent
+        await anyio.to_thread.run_sync(classify_intent, "bonjour")
+        logger.info("🧭 Semantic router warmed up (exemplar embeddings cached)")
+    except Exception as e:
+        logger.warning(f"⚠️ Semantic router warm-up failed (non-critical): {e}")
+
     # --- Redis connection pool (caching + analytics) ---
     try:
         from backend.services.redis_client import get_redis
@@ -102,6 +114,11 @@ async def lifespan(app: FastAPI):
         from backend.services.iway_client import close_client
         await close_client()
         logger.info("🔌 I-Way API client closed.")
+    except Exception:
+        pass
+    try:
+        from backend.services.iway_soap_client import close_soap_clients
+        await close_soap_clients()
     except Exception:
         pass
     logger.info("🛑 Digital Twin Shutting Down.")
@@ -184,7 +201,7 @@ async def root():
 @app.get("/health", tags=["System"])
 async def health_check():
     """Health check endpoint for Docker Compose and monitoring."""
-    from backend.services.rag_service import knowledge_store
+    from backend.services.rag_service import get_knowledge_count
     from backend.services.resilience import llm_circuit, embedding_circuit, api_circuit, CircuitState
 
     # Check circuit breaker health
@@ -193,11 +210,12 @@ async def health_check():
         for cb in [llm_circuit, embedding_circuit, api_circuit]
     )
 
+    kb = get_knowledge_count()
     return {
         "status": "healthy" if circuits_healthy else "degraded",
         "services": {
             "api": "up",
-            "knowledge_store": f"{knowledge_store.count} entries",
+            "knowledge_store": f"{kb['total']} entries ({kb['store']})",
             "llm_circuit": llm_circuit.state.value,
             "embedding_circuit": embedding_circuit.state.value,
             "websocket_connections": len(ws_manager.active_connections),

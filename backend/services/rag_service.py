@@ -267,6 +267,17 @@ class InMemoryVectorStore:
 # --- Global store instance (in-memory fallback) ---
 knowledge_store = InMemoryVectorStore()
 
+# Last successful sync summary — /health reads this because the PGVector path
+# stores chunks in Postgres and leaves the in-memory counter at 0.
+last_sync_info = {"store": "none", "total": 0}
+
+
+def get_knowledge_count() -> dict:
+    """Knowledge entry count + backing store, for health/monitoring."""
+    if knowledge_store.count > 0:
+        return {"store": "in_memory", "total": knowledge_store.count}
+    return dict(last_sync_info)
+
 
 # ==============================================================
 # HIGH-LEVEL RAG API
@@ -340,6 +351,7 @@ def sync_knowledge_from_api(kb_items: List[Dict[str, Any]]) -> Dict[str, int]:
             pgvector.add_documents(lc_docs)
             
             logger.info(f"🗄️ PGVector sync complete: {len(lc_docs)} chunks stored")
+            last_sync_info.update({"store": "pgvector", "total": len(lc_docs)})
             return {
                 "inserted": len(lc_docs),
                 "updated": 0,
@@ -372,6 +384,7 @@ def sync_knowledge_from_api(kb_items: List[Dict[str, Any]]) -> Dict[str, int]:
             updated += 1
 
     logger.info(f"📚 In-memory sync: {inserted} inserted, {updated} updated, {knowledge_store.count} total")
+    last_sync_info.update({"store": "in_memory", "total": knowledge_store.count})
     return {
         "inserted": inserted,
         "updated": updated,
