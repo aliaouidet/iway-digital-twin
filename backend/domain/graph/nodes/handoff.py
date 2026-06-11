@@ -7,7 +7,7 @@ indicating a genuinely complex case that needs human review.
 
 import logging
 
-from state import ClaimsGraphState
+from backend.domain.state import ClaimsGraphState
 
 logger = logging.getLogger("I-Way-Twin")
 

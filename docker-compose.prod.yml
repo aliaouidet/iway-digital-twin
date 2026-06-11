@@ -1,55 +1,54 @@
 # ============================================================
-# I-Way Digital Twin — Docker Compose
-# Enterprise-grade local development environment
+# I-Way Digital Twin — PRODUCTION Docker Compose (standalone)
 # ============================================================
-# Usage:
-#   docker compose up -d --build   # First run / after a dependency change
-#   docker compose up -d           # Day-to-day (code hot-reloads via the bind mount)
-#   docker compose logs -f api     # Follow API logs
-#   docker compose down -v         # Stop + remove volumes
+# Usage (on the deploy VM):
+#   docker compose -f docker-compose.prod.yml up -d --build
 #
-# The 4 Python services (api/worker/beat/flower) all run the SAME image
-# (iway-twin:latest, built once) with different commands — see the &app-image
-# anchor. Shared env and log limits are defined once via anchors too.
+# Differences vs the dev compose (deliberate — see architecture review):
+#   - API/worker/beat/flower run as NON-ROOT (appuser), no --reload, no source
+#     bind mounts (code is baked into the image) → git pull no longer drops
+#     every live WebSocket; uvicorn runs 2 workers.
+#   - Frontend is a real production build (ng build → nginx), not ng serve.
+#   - Ops UIs (pgAdmin/RedisInsight/Flower/Jaeger) bind to 127.0.0.1 only —
+#     reach them via SSH tunnel, not the office LAN.
+#   - ENVIRONMENT=production: disables the dev-only RFC1918 CORS regex; set
+#     ALLOWED_ORIGINS to the real frontend origin(s).
+#   - JWT keypair persists in the jwt_keys volume (restart ≠ global logout).
 #
-# Monitoring UIs:
-#   Flower → :5555   pgAdmin → :5051   RedisInsight → :5540   Jaeger → :16686
+# NOTE: this is a standalone file (not an override) because compose overrides
+# cannot REMOVE the dev file's .:/app bind mounts.
 # ============================================================
 
-# --- Reusable building blocks (YAML anchors) ----------------------------------
 x-app-image: &app-image
   build:
     context: .
     dockerfile: Dockerfile
-  image: iway-twin:latest          # one image, reused by all 4 Python services
+  image: iway-twin:latest
 
-x-app-env: &app-env                # shared env for api + worker (the data-layer services)
-  DATABASE_URL: postgresql+asyncpg://iway:iway_secret@db:5432/iway_db
+x-app-env: &app-env
+  ENVIRONMENT: production
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4200}
+  DATABASE_URL: postgresql+asyncpg://iway:${DB_PASSWORD:-iway_secret}@db:5432/iway_db
   REDIS_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis:6379/0
-  # Celery runs on its OWN Redis (redis-broker, noeviction). The cache Redis
-  # uses allkeys-lru — sharing it meant queued tasks could be silently EVICTED
-  # under memory pressure (the classic Redis-as-broker footgun).
   CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/0
   CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/1
   IWAY_USE_REAL_API: ${IWAY_USE_REAL_API:-false}
   IWAY_API_BASE_URL: ${IWAY_API_BASE_URL:-http://localhost:8000}
   IWAY_API_KEY: ${IWAY_API_KEY:-}
-  # Real I-Way SOAP services (live calls need the company LAN; WSDLs bundled in ./Webservices)
   IWAY_SOAP_BASE_URL: ${IWAY_SOAP_BASE_URL:-http://192.168.111.102:8080/axis2/services}
   IWAY_SOAP_LOAD_LOCAL_WSDL: ${IWAY_SOAP_LOAD_LOCAL_WSDL:-true}
   IWAY_SOAP_USER: ${IWAY_SOAP_USER:-admin}
   IWAY_SOAP_PASSWORD: ${IWAY_SOAP_PASSWORD:-admin}
   IWAY_SOAP_TIMEOUT: ${IWAY_SOAP_TIMEOUT:-15}
   IWAY_SOAP_CONNECT_TIMEOUT: ${IWAY_SOAP_CONNECT_TIMEOUT:-5}
-  OLLAMA_BASE_URL: http://ollama:11434/v1
-  GCP_PROJECT_ID: ${GCP_PROJECT_ID:-caramel-medley-407500}
-  GCP_LOCATION: ${GCP_LOCATION:-us-central1}
-  GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
   GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
   USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
   DB_HOST: db
+  # Non-root: HuggingFace cache + JWT keys live on named volumes (see Dockerfile dirs)
+  HF_HOME: /hf_cache
+  JWT_KEYS_DIR: /app/keys
 
-x-logging: &default-logging        # cap container logs so they never fill the disk
+x-logging: &default-logging
   driver: json-file
   options:
     max-size: "10m"
@@ -57,19 +56,18 @@ x-logging: &default-logging        # cap container logs so they never fill the d
 
 services:
 
-  # --- PostgreSQL + pgvector ---
   db:
     image: pgvector/pgvector:pg16
     container_name: iway-db
     environment:
       POSTGRES_DB: iway_db
       POSTGRES_USER: iway
-      POSTGRES_PASSWORD: iway_secret
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-iway_secret}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backend/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     ports:
-      - "5436:5432"
+      - "127.0.0.1:5436:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U iway -d iway_db" ]
       interval: 5s
@@ -79,7 +77,6 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Redis Stack (pub/sub + semantic cache ONLY — broker moved to redis-broker) ---
   redis:
     image: redis/redis-stack-server:latest
     container_name: iway-redis
@@ -87,8 +84,6 @@ services:
       - REDIS_ARGS=--requirepass ${REDIS_PASSWORD:-iway_redis_secret} --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redisdata:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -97,8 +92,6 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Redis (Celery broker + results — dedicated, NON-evictable) ---
-  # noeviction: a full broker fails loudly instead of silently dropping tasks.
   redis-broker:
     image: redis:7-alpine
     container_name: iway-redis-broker
@@ -113,12 +106,10 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # --- FastAPI Backend ---
   api:
     <<: *app-image
     container_name: iway-api
-    user: root
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
     environment:
       <<: *app-env
       MOCK_SERVER_URL: http://localhost:8000
@@ -126,9 +117,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/app # Hot reload in development
-      - hf_cache:/root/.cache/huggingface
-      - ${APPDATA:-~/.config}/gcloud:/root/.config/gcloud:ro
+      - jwt_keys:/app/keys
+      - hf_cache_prod:/hf_cache
     depends_on:
       db:
         condition: service_healthy
@@ -139,18 +129,14 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Celery Worker (background tasks: sync, embedding) ---
   worker:
     <<: *app-image
     container_name: iway-worker
-    user: root
     command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2
     environment:
       <<: *app-env
     volumes:
-      - .:/app
-      - hf_cache:/root/.cache/huggingface
-      - ${APPDATA:-~/.config}/gcloud:/root/.config/gcloud:ro
+      - hf_cache_prod:/hf_cache
     depends_on:
       db:
         condition: service_healthy
@@ -161,76 +147,55 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Celery Beat (periodic task scheduler) ---
   beat:
     <<: *app-image
     container_name: iway-beat
-    user: root
     command: celery -A backend.workers.celery_app beat --loglevel=info
     environment:
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/1
-    volumes:
-      - .:/app
-      - hf_cache:/root/.cache/huggingface
+      <<: *app-env
     depends_on:
       redis-broker:
         condition: service_healthy
     logging: *default-logging
     restart: unless-stopped
 
-  # ============================================================
-  # MONITORING STACK
-  # ============================================================
-
-  # --- Flower (Celery Monitoring) ---  URL: http://localhost:5555
   flower:
     <<: *app-image
     container_name: iway-flower
-    user: root
     command: celery -A backend.workers.celery_app flower --port=5555 --broker_api=redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/0 --persistent=True --db=/data/flower.db
     environment:
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-iway_redis_secret}@redis-broker:6379/1
+      <<: *app-env
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     volumes:
-      - .:/app
       - flower_data:/data
-      - hf_cache:/root/.cache/huggingface
     depends_on:
       redis-broker:
         condition: service_healthy
     logging: *default-logging
     restart: unless-stopped
 
-  # --- pgAdmin (PostgreSQL Monitoring) ---  URL: http://localhost:5051 (admin@iway.tn / admin)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: iway-pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@iway.tn
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
     ports:
-      - "5051:80"
+      - "127.0.0.1:5051:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-      - ./monitoring/pgadmin-servers.json:/pgadmin4/servers.json
-      - ./monitoring/.pgpass:/pgadmin4/.pgpass:ro
     depends_on:
       db:
         condition: service_healthy
     logging: *default-logging
     restart: unless-stopped
 
-  # --- RedisInsight (Redis Monitoring) ---  URL: http://localhost:5540
   redisinsight:
     image: redis/redisinsight:latest
     container_name: iway-redisinsight
     ports:
-      - "5540:5540"
+      - "127.0.0.1:5540:5540"
     volumes:
       - redisinsight_data:/data
     depends_on:
@@ -239,58 +204,37 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Jaeger (OpenTelemetry Distributed Tracing) ---  URL: http://localhost:16686
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: iway-jaeger
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    # UI localhost-only; the OTLP receiver (4317) stays internal — services
+    # reach it as jaeger:4317 on the compose network, no host publish needed.
     ports:
-      - "16686:16686" # Web UI
-      - "4317:4317" # OTLP gRPC receiver
+      - "127.0.0.1:16686:16686"
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Angular Frontend (Development Server) ---
   frontend:
-    image: node:20-alpine
+    build:
+      context: ./iway ui
+      dockerfile: Dockerfile
+    image: iway-frontend:latest
     container_name: iway-frontend
-    working_dir: /app
-    command: sh -c "npm install && npx ng serve --host 0.0.0.0 --port 4200 --disable-host-check --poll 2000"
-    volumes:
-      - "./iway ui:/app"
-      - frontend_node_modules:/app/node_modules
     ports:
-      - "4200:4200"
+      - "4200:80"
     depends_on:
       - api
     logging: *default-logging
     restart: unless-stopped
 
-  # --- Ollama (Local LLM Serving) ---
-  # Uncomment and configure GPU passthrough for local LLM support
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: iway-ollama
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ollama_models:/root/.ollama
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: 1
-  #             capabilities: [gpu]
-  #   restart: unless-stopped
-
 volumes:
   pgdata:
   redisdata:
   redisbroker_data:
-  frontend_node_modules:
   flower_data:
   pgadmin_data:
   redisinsight_data:
-  hf_cache: # ollama_models:
+  hf_cache_prod:
+  jwt_keys:

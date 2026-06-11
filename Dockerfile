@@ -65,6 +65,14 @@ COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 # Application code (build context trimmed by .dockerignore).
 COPY --chown=appuser:appuser . .
 
+# Writable dirs for NON-ROOT prod runs (docker-compose.prod.yml):
+#   /app/keys  → persisted JWT keypair volume
+#   /hf_cache  → HuggingFace model cache volume (HF_HOME)
+#   /data      → flower state volume
+# Named volumes inherit ownership from the image path, so chown here.
+RUN mkdir -p /app/keys /hf_cache /data \
+    && chown -R appuser:appuser /app/keys /hf_cache /data
+
 USER appuser
 
 EXPOSE 8000

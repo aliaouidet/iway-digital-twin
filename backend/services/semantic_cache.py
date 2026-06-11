@@ -6,6 +6,7 @@ to short-circuit the LangGraph LLM pipeline, providing O(1) latency.
 """
 
 import os
+import re
 import logging
 from typing import Optional
 
@@ -13,15 +14,23 @@ from redisvl.index import SearchIndex
 from redisvl.schema import IndexSchema
 from redisvl.query import VectorQuery
 
+from backend.config import get_settings
 from backend.services.rag_service import embed_text
 
 logger = logging.getLogger("I-Way-Twin")
+settings = get_settings()
+
+# The index name embeds the embedding-model slug: swapping the model creates a
+# FRESH index instead of mixing incompatible vector spaces (old entries simply
+# expire via TTL). Dims come from settings — they must match the model.
+_MODEL_SLUG = re.sub(r"[^a-z0-9]+", "_", settings.EMBEDDING_MODEL.lower()).strip("_")
+_INDEX_NAME = f"iway_semantic_cache_v5_{_MODEL_SLUG}"
 
 # Define RedisVL Schema
 schema = IndexSchema.from_dict({
     "index": {
-        "name": "iway_semantic_cache_v4",
-        "prefix": "cache_v4:",
+        "name": _INDEX_NAME,
+        "prefix": f"{_INDEX_NAME}:",
         "storage_type": "hash"
     },
     "fields": [
@@ -31,9 +40,11 @@ schema = IndexSchema.from_dict({
             "name": "query_vector",
             "type": "vector",
             "attrs": {
-                "dims": 384,  # all-MiniLM-L6-v2 dimension
+                "dims": settings.EMBEDDING_DIMENSIONS,
                 "distance_metric": "cosine",
-                "algorithm": "flat",
+                # HNSW: O(log n) lookups — the old "flat" algorithm full-scanned
+                # every cached vector on the hottest path of every message.
+                "algorithm": "hnsw",
                 "datatype": "float32"
             }
         }
@@ -121,9 +132,14 @@ async def store_semantic_cache(query: str, response: str):
             "response": response,
             "query_vector": vector_bytes
         }
-        
-        index.load([data])
-        logger.debug(f"Stored query in Semantic Cache: '{query[:30]}...'")
+
+        keys = index.load([data])
+        # TTL: cached answers expire instead of living until LRU eviction —
+        # bounds staleness (policy changes) AND keeps the index small.
+        ttl_seconds = settings.SEMANTIC_CACHE_TTL_HOURS * 3600
+        for key in keys or []:
+            index.client.expire(key, ttl_seconds)
+        logger.debug(f"Stored query in Semantic Cache (TTL {settings.SEMANTIC_CACHE_TTL_HOURS}h): '{query[:30]}...'")
     except Exception as e:
         logger.warning(f"Failed to store in Semantic Cache: {e}")
 

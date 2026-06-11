@@ -178,59 +178,41 @@ def get_simulated_ai_response(query: str) -> dict:
 # MAIN WEBSOCKET HANDLER
 # ==============================================================
 
-def _compute_queue_position(sessions_store: dict, session_id: str) -> int:
-    """1-based position in the human-handoff queue (this session counted last).
-
-    Truthful replacement for the old hardcoded 'position : 1' — counts how many
-    OTHER sessions are already awaiting an agent, so the user sees a real number.
-    """
-    ahead = sum(
-        1 for sid, s in sessions_store.items()
-        if sid != session_id and s.get("status") == "handoff_pending"
-    )
-    return ahead + 1
+# Handoff banner contract lives in escalation_flow (single source for all paths).
+from backend.services.escalation_flow import send_handoff_started as _hf_send
 
 
 async def _send_handoff_started(websocket, sessions_store: dict, session_id: str,
                                 reason: str, *, degraded: bool = False):
-    """Emit the handoff_started banner event with the real queue position.
-
-    Single source of the banner contract — used by every escalation path
-    (graph escalation, low-confidence, service-degraded, manual request) so the
-    queue_position/estimated_wait_min fields can never be forgotten on one path.
-    """
-    pos = _compute_queue_position(sessions_store, session_id)
-    payload = {
-        "type": "handoff_started",
-        "reason": reason,
-        "keep_chatting": True,
-        "queue_position": pos,
-        "estimated_wait_min": pos * 3,
-    }
-    if degraded:
-        payload["degraded"] = True
-    await websocket.send_json(payload)
+    """Thin wrapper kept for call-site stability — delegates to escalation_flow."""
+    await _hf_send(websocket, session_id, reason, degraded=degraded)
 
 
-async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_store: dict, ws_manager):
+async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_store: dict,
+                                ws_manager, accepted: bool = False):
     """
     Per-session WebSocket handler with full resilience.
-    
+
     AI Response Strategy (ordered by priority):
     1. LangGraph Agent (tools + LLM reasoning) — primary
     2. RAG-only similarity lookup — fallback if agent fails
     3. Simulated hardcoded responses — last resort if RAG store is empty
-    
+
     Concurrency: Uses per-session asyncio.Lock to prevent race conditions
     when user and agent WebSockets mutate session state simultaneously.
+
+    `accepted=True` means the endpoint already accepted the socket (first-frame
+    auth handshake in main.py) — don't accept twice.
     """
+    if not accepted:
+        await websocket.accept()
+
     session = sessions_store.get(session_id)
     if not session:
         await websocket.close(code=4004)
         return
 
     lock = get_session_lock(session_id)
-    await websocket.accept()
     is_agent = False
 
     try:

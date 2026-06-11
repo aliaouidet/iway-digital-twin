@@ -6,6 +6,15 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # --- Environment ---
+    # "development" keeps dev conveniences on (RFC1918 CORS regex, demo personas).
+    # "production" turns them off — set via docker-compose.prod.yml.
+    ENVIRONMENT: str = "development"
+
+    # Comma-separated list of allowed CORS origins. In production this is the
+    # ONLY origin source (the wide private-LAN regex is dev-only).
+    ALLOWED_ORIGINS: str = "http://localhost:4200,http://127.0.0.1:4200,http://localhost:8000"
+
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://iway:iway_secret@localhost:5432/iway_db"
 
@@ -47,6 +56,11 @@ class Settings(BaseSettings):
     # --- JWT ---
     JWT_ALGORITHM: str = "RS256"
     JWT_EXPIRATION_MINUTES: int = 60
+    # Directory holding the persisted RSA keypair. Persisting (instead of
+    # regenerating at startup) means an API restart no longer invalidates
+    # every live session's token. Dev: ./keys (gitignored, survives via the
+    # bind mount). Prod: a named volume (see docker-compose.prod.yml).
+    JWT_KEYS_DIR: str = "./keys"
 
     # --- RAG ---
     RAG_TOP_K: int = 5
@@ -58,6 +72,12 @@ class Settings(BaseSettings):
     CONFIDENCE_THRESHOLD: float = 0.30
     HITL_BOOST_FACTOR: float = 1.15
     SESSION_TTL_HOURS: int = 24
+
+    # --- Semantic cache ---
+    SEMANTIC_CACHE_TTL_HOURS: int = 72   # cached answers expire instead of living until LRU eviction
+
+    # --- Retention ---
+    CHECKPOINT_RETENTION_DAYS: int = 30  # LangGraph checkpoints of resolved sessions older than this are pruned
 
     # --- Celery ---
     CELERY_BROKER_URL: str = "redis://:iway_redis_secret@localhost:6379/1"

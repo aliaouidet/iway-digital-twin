@@ -13,6 +13,9 @@ ENV/
 .claude/
 CLAUDE.md
 
+# Persisted JWT keypair (never commit credentials)
+keys/
+
 # Distribution / packaging
 dist/
 build/

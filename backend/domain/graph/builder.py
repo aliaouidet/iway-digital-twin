@@ -19,7 +19,7 @@ import logging
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from state import ClaimsGraphState
+from backend.domain.state import ClaimsGraphState
 
 from backend.domain.graph.nodes import (
     decompose_node,

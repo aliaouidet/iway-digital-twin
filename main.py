@@ -19,8 +19,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
 
 from backend.config import get_settings
 from backend.routers.auth import router as auth_router, auth_state
@@ -50,12 +48,12 @@ ws_manager = ConnectionManager()
 # --- Lifespan (RSA Key Generation + Graph Init) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔐 Generating RSA 2048-bit Key Pair...")
-    auth_state.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    auth_state.public_key_pem = auth_state.private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
+    # Load (or generate-and-persist) the RSA keypair. Persisting means an API
+    # restart no longer invalidates every live JWT (previously keys were
+    # regenerated per process, logging everyone out on each deploy/reload).
+    from backend.routers.auth import init_keys
+    loaded = init_keys(settings.JWT_KEYS_DIR)
+    logger.info(f"🔐 RSA keypair {'loaded from' if loaded else 'generated into'} {settings.JWT_KEYS_DIR}")
     # Inject WebSocket manager into sessions router
     set_ws_manager(ws_manager)
 
@@ -74,6 +72,35 @@ async def lifespan(app: FastAPI):
     # --- Claims StateGraph initialization (Phase 5) ---
     logger.info("🧠 Initializing Claims StateGraph...")
     await init_claims_graph_async()
+
+    # --- Restore ALL non-resolved sessions from PostgreSQL ---
+    # Without this, an API restart silently emptied the agent escalation queue:
+    # handoff_pending users stayed stranded until they sent another message.
+    from backend.services.session_store import hydrate_all_sessions
+    await hydrate_all_sessions()
+
+    # --- Ensure pgvector ANN index (idempotent) ---
+    # Without an HNSW index, similarity search on langchain_pg_embedding is a
+    # sequential scan — fine at 1k chunks, painful at 100k+.
+    try:
+        from sqlalchemy import text as _sql
+        from backend.database.connection import async_session_factory
+        dims = settings.EMBEDDING_DIMENSIONS
+        async with async_session_factory() as db:
+            # langchain_postgres creates the column as dimensionless `vector`;
+            # HNSW requires fixed dims — type it first (no-op once applied).
+            await db.execute(_sql(
+                f"ALTER TABLE langchain_pg_embedding "
+                f"ALTER COLUMN embedding TYPE vector({dims}) USING embedding::vector({dims})"
+            ))
+            await db.execute(_sql(
+                "CREATE INDEX IF NOT EXISTS langchain_embedding_hnsw_idx "
+                "ON langchain_pg_embedding USING hnsw (embedding vector_cosine_ops)"
+            ))
+            await db.commit()
+        logger.info(f"📐 pgvector HNSW index ensured (vector({dims}))")
+    except Exception as e:
+        logger.warning(f"⚠️ pgvector HNSW index skipped (table may not exist yet): {e}")
 
     # --- Semantic router warm-up ---
     # The router embeds its ~100 exemplar utterances lazily on first use, which
@@ -161,22 +188,21 @@ try:
 except ImportError:
     logger.warning("⚠️ OpenTelemetry not installed. Tracing disabled.")
 
+# CORS: explicit origins come from settings.ALLOWED_ORIGINS (comma-separated env
+# var) — in production that list is the ONLY source. The wide private-LAN regex
+# is a development convenience (open the app at any LAN IP without per-IP edits)
+# and is disabled when ENVIRONMENT=production.
+_cors_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
+_dev_lan_regex = (
+    r"http://(localhost|127\.0\.0\.1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}):(4200|8000)"
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:4200",      # Angular dev server
-        "http://127.0.0.1:4200",
-        "http://localhost:8000",       # Swagger UI (same-origin)
-    ],
-    # On-prem deploy: the app is opened at http://<server-lan-ip>:4200 and calls the API
-    # at http://<server-lan-ip>:8000 — a cross-origin request. Allow any private-LAN host
-    # (RFC1918 + localhost) on the app/API ports so it works without per-IP edits.
-    allow_origin_regex=(
-        r"http://(localhost|127\.0\.0\.1|"
-        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-        r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
-        r"192\.168\.\d{1,3}\.\d{1,3}):(4200|8000)"
-    ),
+    allow_origins=_cors_origins,
+    allow_origin_regex=(None if settings.ENVIRONMENT == "production" else _dev_lan_regex),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -212,6 +238,7 @@ async def health_check():
     """Health check endpoint for Docker Compose and monitoring."""
     from backend.services.rag_service import get_knowledge_count
     from backend.services.resilience import llm_circuit, embedding_circuit, api_circuit, CircuitState
+    from backend.services.persistence_health import get_persistence_health
 
     # Check circuit breaker health
     circuits_healthy = all(
@@ -220,8 +247,10 @@ async def health_check():
     )
 
     kb = get_knowledge_count()
+    persistence = get_persistence_health()
+    healthy = circuits_healthy and not persistence["degraded"]
     return {
-        "status": "healthy" if circuits_healthy else "degraded",
+        "status": "healthy" if healthy else "degraded",
         "services": {
             "api": "up",
             "knowledge_store": f"{kb['total']} entries ({kb['store']})",
@@ -229,6 +258,7 @@ async def health_check():
             "embedding_circuit": embedding_circuit.state.value,
             "websocket_connections": len(ws_manager.active_connections),
         },
+        "persistence": persistence,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -245,33 +275,62 @@ async def readiness_probe():
     return {"status": "ready", "timestamp": datetime.now().isoformat()}
 
 
+# --- WebSocket auth handshake ---
+async def _ws_authenticate(websocket: WebSocket, token: str | None, require_roles=None):
+    """Accept the socket and authenticate.
+
+    Preferred protocol: the client's FIRST frame is {"type": "auth", "token": jwt}
+    — tokens in query strings leak into proxy logs / browser history. The legacy
+    ?token= query param is still honored for backward compatibility.
+
+    Returns {"matricule", "role"} on success; closes the socket and returns None
+    on failure. The socket is ACCEPTED either way (callers must not re-accept).
+    """
+    from backend.routers.auth import verify_jwt, MOCK_USERS
+
+    await websocket.accept()
+
+    if not token:
+        try:
+            raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            frame = json.loads(raw)
+            if str(frame.get("type", "")).lower() != "auth":
+                await websocket.close(code=4001)
+                return None
+            token = frame.get("token") or (frame.get("payload") or {}).get("token")
+        except Exception:
+            await websocket.close(code=4001)
+            return None
+
+    try:
+        payload = verify_jwt(token)
+    except Exception:
+        await websocket.close(code=4001)
+        return None
+
+    matricule = payload.get("sub")
+    user = MOCK_USERS.get(matricule, {})
+    role = user.get("role", "Adherent")
+    if require_roles and role not in require_roles:
+        await websocket.close(code=4003)
+        logger.warning(f"⛔ WebSocket rejected: role '{role}' not authorized")
+        return None
+    return {"matricule": matricule, "role": role}
+
+
 # --- Admin/Agent events WebSocket ---
 @app.websocket("/ws/events")
 async def websocket_events(websocket: WebSocket, token: str = None):
     """WebSocket endpoint for real-time dashboard/agent updates.
 
-    Requires JWT auth via query parameter. Only Agent/Admin roles allowed.
+    Auth: first-frame {"type":"auth","token":...} (or legacy ?token=).
+    Only Agent/Admin roles allowed.
     """
-    # --- C5 Fix: Authenticate + authorize before accepting ---
-    if not token:
-        await websocket.close(code=4001)
-        logger.warning("⛔ Events WebSocket rejected: no token provided")
-        return
-    try:
-        from backend.routers.auth import verify_jwt, MOCK_USERS
-        payload = verify_jwt(token)
-        matricule = payload.get("sub")
-        user = MOCK_USERS.get(matricule, {})
-        if user.get("role") not in ("Agent", "Admin"):
-            await websocket.close(code=4003)
-            logger.warning(f"⛔ Events WebSocket rejected: role '{user.get('role')}' not authorized")
-            return
-    except Exception as e:
-        await websocket.close(code=4001)
-        logger.warning(f"⛔ Events WebSocket auth failed: {e}")
+    auth = await _ws_authenticate(websocket, token, require_roles=("Agent", "Admin"))
+    if not auth:
         return
 
-    await ws_manager.connect(websocket, role=user.get("role", "Agent"), matricule=matricule)
+    await ws_manager.connect(websocket, role=auth["role"], matricule=auth["matricule"], accepted=True)
     try:
         while True:
             from backend.database.connection import async_session_factory
@@ -315,23 +374,15 @@ async def websocket_events(websocket: WebSocket, token: str = None):
 async def chat_websocket(websocket: WebSocket, session_id: str, token: str = None):
     """Per-session WebSocket for user/agent chat.
 
-    Requires JWT auth via query parameter:
-      ws://localhost:8000/ws/chat/{session_id}?token={jwt}
+    Auth: first-frame {"type":"auth","token":...} (or legacy ?token= during the
+    transition — query-string tokens leak into proxy logs).
     """
-    # --- C4 Fix: Reject unauthenticated connections ---
-    if not token:
-        await websocket.close(code=4001)
-        logger.warning(f"⛔ Chat WebSocket rejected: no token for session {session_id}")
-        return
-    try:
-        from backend.routers.auth import verify_jwt
-        verify_jwt(token)
-    except Exception as e:
-        await websocket.close(code=4001)
-        logger.warning(f"⛔ Chat WebSocket auth failed for session {session_id}: {e}")
+    auth = await _ws_authenticate(websocket, token)
+    if not auth:
+        logger.warning(f"⛔ Chat WebSocket auth failed for session {session_id}")
         return
 
-    await handle_chat_websocket(websocket, session_id, SESSIONS, ws_manager)
+    await handle_chat_websocket(websocket, session_id, SESSIONS, ws_manager, accepted=True)
 
 
 # --- Entry Point ---

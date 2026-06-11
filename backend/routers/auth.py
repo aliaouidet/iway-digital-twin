@@ -32,6 +32,48 @@ class AuthState:
 auth_state = AuthState()
 
 
+def init_keys(keys_dir: str) -> bool:
+    """Load the RSA keypair from disk, generating + persisting it on first run.
+
+    Persisting the keypair means an API restart no longer invalidates every
+    live JWT (previously keys were regenerated per process, logging everyone
+    out mid-conversation on each deploy/reload).
+
+    Returns True if the key was loaded from disk, False if freshly generated.
+    """
+    from pathlib import Path
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    key_dir = Path(keys_dir)
+    key_path = key_dir / "jwt_private.pem"
+
+    if key_path.exists():
+        auth_state.private_key = serialization.load_pem_private_key(
+            key_path.read_bytes(), password=None,
+        )
+        loaded = True
+    else:
+        key_dir.mkdir(parents=True, exist_ok=True)
+        auth_state.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        key_path.write_bytes(auth_state.private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ))
+        try:  # best-effort: restrict to owner (POSIX only — no-op on Windows)
+            key_path.chmod(0o600)
+        except Exception:
+            pass
+        loaded = False
+
+    auth_state.public_key_pem = auth_state.private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return loaded
+
+
 # --- Pydantic Models ---
 class LoginInput(BaseModel):
     matricule: str
@@ -160,6 +202,21 @@ async def login(data: LoginInput):
             "email": user.get("email", ""),
             "specialite": user.get("specialite", "")
         }
+    }
+
+
+@router.post("/refresh")
+async def refresh_token(matricule: str = Depends(get_current_user)):
+    """Sliding-session renewal: exchange a valid (non-expired) token for a fresh one.
+
+    Lets the frontend renew before expiry instead of dropping the user to the
+    login screen mid-conversation.
+    """
+    token = create_jwt(matricule)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": settings.JWT_EXPIRATION_MINUTES * 60,
     }
 
 
