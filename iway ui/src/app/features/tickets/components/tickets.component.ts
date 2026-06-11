@@ -6,6 +6,7 @@ import { TicketService } from '../../../core/services/ticket.service';
 import { LogsService } from '../../../core/services/logs.service';
 import { WebSocketService } from '../../../core/services/websocket.service';
 import { LogEntry } from '../../../shared/models';
+import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-tickets',
@@ -141,21 +142,10 @@ import { LogEntry } from '../../../shared/models';
               </div>
             </div>
 
-            <!-- Action Buttons -->
-            <div class="flex gap-3 pt-2">
-              <button class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
-                Reprocess
-              </button>
-              <button *ngIf="selectedTicket()!.outcome !== 'HUMAN_ESCALATED'" class="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
-                Assign Human
-              </button>
-            </div>
-            
-            <a *ngIf="selectedTicket()!.otel_trace_id" 
-               [href]="'http://localhost:16686/trace/' + selectedTicket()!.otel_trace_id" 
-               target="_blank"
+            <!-- Trace link (Jaeger) — the only real action available here -->
+            <a *ngIf="selectedTicket()!.otel_trace_id && jaegerUrl"
+               [href]="jaegerUrl + '/trace/' + selectedTicket()!.otel_trace_id"
+               target="_blank" rel="noopener"
                class="w-full mt-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
               View in Jaeger (OpenTelemetry)
@@ -171,6 +161,7 @@ export class TicketsComponent implements OnInit, OnDestroy {
   selectedTicket = signal<LogEntry | null>(null);
   activeFilter = signal('all');
   isLoading = signal(true);
+  jaegerUrl = environment.jaegerUrl;
 
   filterTabs: { label: string; value: string; count: () => number }[] = [];
 

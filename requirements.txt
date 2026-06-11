@@ -30,7 +30,11 @@ langgraph-checkpoint-postgres>=0.0.1
 
 # === Embeddings & ML ===
 sentence-transformers>=3.0.0
-numpy>=1.26.0
+# Pinned <2: NumPy 2.x manylinux wheels require the x86-64-v2 CPU baseline, which the
+# Proxmox deploy VM (generic kvm64/qemu64 vCPU) does not expose → RuntimeError on import.
+# 1.26.x wheels use the x86-64-v1 baseline and run there. (Permanent fix: set the VM CPU
+# type to `host` in Proxmox, then this pin can be relaxed.)
+numpy>=1.26.0,<2.0
 
 # === Celery (background tasks, scheduling, monitoring) ===
 celery[redis]>=5.3.0

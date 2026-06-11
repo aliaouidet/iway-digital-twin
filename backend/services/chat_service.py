@@ -178,6 +178,19 @@ def get_simulated_ai_response(query: str) -> dict:
 # MAIN WEBSOCKET HANDLER
 # ==============================================================
 
+def _compute_queue_position(sessions_store: dict, session_id: str) -> int:
+    """1-based position in the human-handoff queue (this session counted last).
+
+    Truthful replacement for the old hardcoded 'position : 1' — counts how many
+    OTHER sessions are already awaiting an agent, so the user sees a real number.
+    """
+    ahead = sum(
+        1 for sid, s in sessions_store.items()
+        if sid != session_id and s.get("status") == "handoff_pending"
+    )
+    return ahead + 1
+
+
 async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_store: dict, ws_manager):
     """
     Per-session WebSocket handler with full resilience.
@@ -499,10 +512,13 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "tools_called": tools_called,
                                 "intent": ai_result.get("intent"),
                             })
+                            _pos = _compute_queue_position(sessions_store, session_id)
                             await websocket.send_json({
                                 "type": "handoff_started",
                                 "reason": session["reason"],
                                 "keep_chatting": True,
+                                "queue_position": _pos,
+                                "estimated_wait_min": _pos * 3,
                             })
 
                             # Notify agent dashboard in real time
@@ -575,11 +591,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "timestamp": datetime.now().isoformat()
                             })
                             asyncio.create_task(_persist_message(session_id, "system", ai_result["text"]))
+                        _pos = _compute_queue_position(sessions_store, session_id)
                         await websocket.send_json({
                             "type": "handoff_started",
                             "reason": session["reason"],
                             "degraded": True,
                             "keep_chatting": True,
+                            "queue_position": _pos,
+                            "estimated_wait_min": _pos * 3,
                         })
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
@@ -615,10 +634,13 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "timestamp": datetime.now().isoformat()
                             })
                             asyncio.create_task(_persist_message(session_id, "system", sys_msg))
+                        _pos = _compute_queue_position(sessions_store, session_id)
                         await websocket.send_json({
                             "type": "handoff_started",
                             "reason": session["reason"],
                             "keep_chatting": True,
+                            "queue_position": _pos,
+                            "estimated_wait_min": _pos * 3,
                         })
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
@@ -716,14 +738,21 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
             elif msg_type == "manual_handoff_request":
                 session["status"] = "handoff_pending"
                 session["reason"] = "User manually requested a human agent"
-                sys_msg_manual = "Vous avez demande a parler a un agent humain. Transfert en cours..."
+                sys_msg_manual = "Votre demande a été transmise à un conseiller. Vous pouvez continuer à écrire en attendant."
                 session["history"].append({
                     "role": "system",
                     "content": sys_msg_manual,
                     "timestamp": datetime.now().isoformat()
                 })
                 asyncio.create_task(_persist_message(session_id, "system", sys_msg_manual))
-                await websocket.send_json({"type": "handoff_started", "reason": session["reason"], "keep_chatting": True})
+                _pos = _compute_queue_position(sessions_store, session_id)
+                await websocket.send_json({
+                    "type": "handoff_started",
+                    "reason": session["reason"],
+                    "keep_chatting": True,
+                    "queue_position": _pos,
+                    "estimated_wait_min": _pos * 3,
+                })
                 await ws_manager.broadcast({
                     "type": "NEW_ESCALATION",
                     "payload": {

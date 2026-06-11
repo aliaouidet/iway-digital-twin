@@ -63,6 +63,19 @@ celerybeat.pid
 .agents
 
 .Webservices/
-
+CLAUDE.md
 # rapport
 rapport_pfe
+
+# Scratch SOAP-probe scripts (local dev only — not deployed)
+call_all_ws.py
+download_ws.py
+find_matricule.py
+find_matricule_queries.sql
+probe_raw.py
+probe_ws.py
+scan_common.py
+scan_paths.py
+test_matricule.py
+test_ws.py
+ws/

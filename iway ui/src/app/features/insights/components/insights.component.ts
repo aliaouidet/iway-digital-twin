@@ -150,7 +150,7 @@ interface CsatStats {
                 </div>
                 <div class="h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div class="h-full rounded-full bg-gradient-to-r from-rose-500 to-orange-400 transition-all duration-500"
-                    [style.width.%]="t.count / (gapData()!.top_missing_topics[0]?.count || 1) * 100"></div>
+                    [style.width.%]="t.count / (gapData()!.top_missing_topics[0].count || 1) * 100"></div>
                 </div>
               </div>
             </div>

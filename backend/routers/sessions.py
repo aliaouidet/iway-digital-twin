@@ -57,6 +57,10 @@ class ApproveInput(BaseModel):
     action: str  # "approve" or "clarify"
     clarification: Optional[str] = None  # Additional text if action is "clarify"
 
+class SuggestInput(BaseModel):
+    # Optional free-text steer from the agent (e.g. "insiste sur les délais").
+    instruction: Optional[str] = None
+
 
 # --- Authorization Helper (C1 Fix) ---
 
@@ -496,6 +500,145 @@ async def resolve_session(
     return result
 
 
+@router.post("/{session_id}/suggest")
+async def suggest_reply(
+    session_id: str,
+    body: Optional[SuggestInput] = None,
+    matricule: str = Depends(get_current_user),
+):
+    """Agent co-pilot — draft a RAG-grounded reply for the agent to review.
+
+    Reuses the same knowledge base + LLM as the chat graph, but returns a
+    candidate the agent edits before sending — it never reaches the user
+    automatically. Agent/Admin only (it is an internal assist, not a user tool).
+    """
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # Internal assist — restrict to staff (the session owner is the client).
+    user = MOCK_USERS.get(matricule, {})
+    if user.get("role") not in ("Agent", "Admin"):
+        raise HTTPException(status_code=403, detail="Only Agent or Admin can request suggestions")
+
+    history = session["history"]
+    last_user = next((m for m in reversed(history) if m["role"] == "user"), None)
+    query = (last_user or {}).get("content", "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="No client message to respond to")
+
+    # Ground the draft in the knowledge base (best-effort — never block on it).
+    docs = []
+    try:
+        from backend.services.rag_service import async_retrieve_context
+        docs = await async_retrieve_context(query, top_k=4)
+    except Exception as e:
+        logger.warning(f"⚠️ Suggest RAG retrieval failed: {e}")
+
+    kb_context = "\n\n".join(f"- {d.get('chunk_text', '')}" for d in docs)[:3000]
+    excerpt = _build_conversation_excerpt(history, max_messages=8)
+
+    try:
+        suggestion = await _generate_reply_suggestion(
+            query, kb_context, excerpt,
+            body.instruction if body else None,
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Suggestion generation failed: {e}")
+        raise HTTPException(status_code=503, detail="Suggestion temporairement indisponible")
+
+    return {
+        "suggestion": suggestion,
+        "grounded": bool(docs),
+        "sources": [
+            {"source_id": d.get("source_id"), "similarity": d.get("similarity")}
+            for d in docs
+        ],
+    }
+
+
+@router.get("/{session_id}/client-context")
+async def get_client_context(
+    session_id: str,
+    matricule: str = Depends(get_current_user),
+):
+    """Live client dossier for the agent panel — contrat, remboursements,
+    bénéficiaires, réclamations for the session's user.
+
+    Real mode pulls from the I-Way SOAP services concurrently and degrades each
+    section honestly on failure (never mock data — see lookups.py contract);
+    mock mode serves the shared demo dicts so the panel is populated in dev.
+    """
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _authorize_session(session, matricule)  # owner or Agent/Admin
+    target = session["user_matricule"]
+
+    from backend.config import get_settings
+    settings = get_settings()
+
+    if not settings.IWAY_USE_REAL_API:
+        from backend.domain.graph.nodes.lookups import (
+            _mock_dossiers, _mock_beneficiaries, _mock_reclamations,
+        )
+        remb = _mock_dossiers()
+        return {
+            "mode": "mock",
+            "matricule": target,
+            "errors": [],
+            "contrat": {
+                "num_police": "POL-DEMO-0001",
+                "produit": "I-Santé Famille",
+                "statut": "Actif",
+                "plafond_annuel": remb.get("plafond_annuel"),
+                "consomme_annuel": remb.get("total_rembourse_2026"),
+            },
+            "remboursements": remb,
+            "beneficiaires": _mock_beneficiaries(),
+            "reclamations": _mock_reclamations(),
+        }
+
+    # ── Real mode: 4 concurrent SOAP calls, honest per-section degradation ──
+    from backend.services import iway_soap_client as soap
+    contrat, remb, benef, recl = await asyncio.gather(
+        soap.get_contrat_adherent(target),
+        soap.get_list_remboursement(target),
+        soap.get_beneficiaires(target),
+        soap.get_list_reclamation(target),
+        return_exceptions=True,
+    )
+
+    errors: List[str] = []
+
+    def _ok(value, name):
+        if isinstance(value, BaseException):
+            logger.warning(f"⚠️ client-context {name} failed for {target}: {value}")
+            errors.append(name)
+            return None
+        return value
+
+    contrat = _ok(contrat, "contrat")
+    remb = _ok(remb, "remboursements")
+    benef = _ok(benef, "beneficiaires")
+    recl = _ok(recl, "reclamations")
+
+    return {
+        "mode": "real",
+        "matricule": target,
+        "errors": errors,
+        "contrat": contrat,
+        "remboursements": remb,
+        "beneficiaires": (
+            {"beneficiaires": benef, "nombre_beneficiaires": len(benef)}
+            if benef is not None else None
+        ),
+        "reclamations": (
+            {"reclamations": recl, "nombre_reclamations": len(recl)}
+            if recl is not None else None
+        ),
+    }
+
+
 # ==============================================================
 # HELPER FUNCTIONS
 # ==============================================================
@@ -563,6 +706,34 @@ def _build_conversation_excerpt(history: list, max_messages: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _build_llm(temperature: float = 0.1):
+    """Construct the chat LLM (local Ollama or Gemini).
+
+    Shared by the briefing summary and the agent co-pilot so both stay on the
+    same model/config and we don't duplicate the construction logic.
+    """
+    from backend.config import get_settings
+    settings = get_settings()
+
+    # Same LLM patterns as agent.py to avoid import/config mismatches
+    if settings.USE_LOCAL_LLM:
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            base_url=settings.OLLAMA_BASE_URL,
+            api_key="ollama",
+            model=settings.OLLAMA_MODEL,
+            temperature=temperature,
+        )
+
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    import os
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=os.getenv("GOOGLE_API_KEY", ""),
+        temperature=temperature,
+    )
+
+
 async def _generate_briefing_summary(
     user_name: str,
     user_role: str,
@@ -571,26 +742,7 @@ async def _generate_briefing_summary(
 ) -> str:
     """Generate an LLM summary of the conversation for the agent briefing."""
     try:
-        from backend.config import get_settings
-        settings = get_settings()
-        
-        # Use the same LLM patterns as agent.py to avoid import/config mismatches
-        if settings.USE_LOCAL_LLM:
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(
-                base_url=settings.OLLAMA_BASE_URL,
-                api_key="ollama",
-                model=settings.OLLAMA_MODEL,
-                temperature=0.1,
-            )
-        else:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            import os
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=os.getenv("GOOGLE_API_KEY", ""),
-                temperature=0.1,
-            )
+        llm = _build_llm(temperature=0.1)
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -633,6 +785,50 @@ def _fallback_summary(user_name: str, user_role: str, reason: str, excerpt: str)
             summary += f"Escaladé car : {reason}."
         return summary
     return f"{user_name} ({user_role}) a contacté le support. Raison: {reason or 'non spécifiée'}."
+
+
+async def _generate_reply_suggestion(
+    query: str,
+    kb_context: str,
+    conversation_excerpt: str,
+    instruction: Optional[str] = None,
+) -> str:
+    """Draft a candidate reply for the agent, grounded in the knowledge base.
+
+    Raises on failure so the endpoint can return 503 — a silent fallback would
+    risk the agent sending an ungrounded, possibly wrong answer to a client.
+    """
+    llm = _build_llm(temperature=0.2)
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    steer = f"\n\nConsigne de l'agent à respecter : {instruction}" if instruction else ""
+    prompt = f"""Tu rédiges une proposition de réponse pour un AGENT HUMAIN du support I-Santé, qui la relira et l'ajustera avant de l'envoyer au client.
+
+Règles :
+- Base-toi UNIQUEMENT sur le contexte ci-dessous et la conversation. N'invente jamais de montant, de date, de taux ni de décision.
+- Si l'information est insuffisante, dis-le honnêtement et propose la prochaine étape (pièce à fournir, vérification, délai).
+- Les montants sont en dinars tunisiens (TND).
+- Ton courtois et professionnel, en français, 2 à 5 phrases.
+
+Contexte (base de connaissances I-Santé) :
+{kb_context or "(aucun extrait pertinent trouvé)"}
+
+Conversation :
+{conversation_excerpt[:3000]}
+
+Dernière demande du client à traiter : {query}{steer}
+
+Proposition de réponse (prête à être relue par l'agent) :"""
+
+    response = await asyncio.wait_for(
+        llm.ainvoke([
+            SystemMessage(content="Tu assistes les agents du support en rédigeant des propositions de réponse fiables, sourcées et prudentes."),
+            HumanMessage(content=prompt),
+        ]),
+        timeout=20.0,
+    )
+    return response.content.strip()
 
 
 # ==============================================================
