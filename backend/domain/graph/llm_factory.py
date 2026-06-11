@@ -15,8 +15,13 @@ from langchain_openai import ChatOpenAI
 logger = logging.getLogger("I-Way-Twin")
 
 
-def build_llm():
-    """Build the LLM instance based on environment configuration."""
+def build_llm(temperature: float = 0):
+    """Build the LLM instance based on environment configuration.
+
+    `temperature` lets callers outside the graph (e.g. the agent briefing /
+    co-pilot in routers/sessions.py) reuse this single source of truth for
+    model selection instead of re-implementing the local/remote branch.
+    """
     use_local = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
 
     if use_local:
@@ -26,7 +31,7 @@ def build_llm():
             base_url=ollama_url,
             api_key="ollama",
             model=ollama_model,
-            temperature=0,
+            temperature=temperature,
         )
         logger.info(f"Graph LLM: LOCAL / {ollama_model}")
     else:
@@ -34,7 +39,7 @@ def build_llm():
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             google_api_key=api_key,
-            temperature=0,
+            temperature=temperature,
         )
         logger.info(f"Graph LLM: GOOGLE AI STUDIO / Gemini 2.5 Flash")
 

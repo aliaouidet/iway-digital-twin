@@ -191,6 +191,27 @@ def _compute_queue_position(sessions_store: dict, session_id: str) -> int:
     return ahead + 1
 
 
+async def _send_handoff_started(websocket, sessions_store: dict, session_id: str,
+                                reason: str, *, degraded: bool = False):
+    """Emit the handoff_started banner event with the real queue position.
+
+    Single source of the banner contract — used by every escalation path
+    (graph escalation, low-confidence, service-degraded, manual request) so the
+    queue_position/estimated_wait_min fields can never be forgotten on one path.
+    """
+    pos = _compute_queue_position(sessions_store, session_id)
+    payload = {
+        "type": "handoff_started",
+        "reason": reason,
+        "keep_chatting": True,
+        "queue_position": pos,
+        "estimated_wait_min": pos * 3,
+    }
+    if degraded:
+        payload["degraded"] = True
+    await websocket.send_json(payload)
+
+
 async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_store: dict, ws_manager):
     """
     Per-session WebSocket handler with full resilience.
@@ -512,14 +533,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "tools_called": tools_called,
                                 "intent": ai_result.get("intent"),
                             })
-                            _pos = _compute_queue_position(sessions_store, session_id)
-                            await websocket.send_json({
-                                "type": "handoff_started",
-                                "reason": session["reason"],
-                                "keep_chatting": True,
-                                "queue_position": _pos,
-                                "estimated_wait_min": _pos * 3,
-                            })
+                            await _send_handoff_started(websocket, sessions_store, session_id, session["reason"])
 
                             # Notify agent dashboard in real time
                             await ws_manager.broadcast({
@@ -591,15 +605,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "timestamp": datetime.now().isoformat()
                             })
                             asyncio.create_task(_persist_message(session_id, "system", ai_result["text"]))
-                        _pos = _compute_queue_position(sessions_store, session_id)
-                        await websocket.send_json({
-                            "type": "handoff_started",
-                            "reason": session["reason"],
-                            "degraded": True,
-                            "keep_chatting": True,
-                            "queue_position": _pos,
-                            "estimated_wait_min": _pos * 3,
-                        })
+                        await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], degraded=True)
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
                             "payload": {
@@ -634,14 +640,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "timestamp": datetime.now().isoformat()
                             })
                             asyncio.create_task(_persist_message(session_id, "system", sys_msg))
-                        _pos = _compute_queue_position(sessions_store, session_id)
-                        await websocket.send_json({
-                            "type": "handoff_started",
-                            "reason": session["reason"],
-                            "keep_chatting": True,
-                            "queue_position": _pos,
-                            "estimated_wait_min": _pos * 3,
-                        })
+                        await _send_handoff_started(websocket, sessions_store, session_id, session["reason"])
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
                             "payload": {
@@ -745,14 +744,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     "timestamp": datetime.now().isoformat()
                 })
                 asyncio.create_task(_persist_message(session_id, "system", sys_msg_manual))
-                _pos = _compute_queue_position(sessions_store, session_id)
-                await websocket.send_json({
-                    "type": "handoff_started",
-                    "reason": session["reason"],
-                    "keep_chatting": True,
-                    "queue_position": _pos,
-                    "estimated_wait_min": _pos * 3,
-                })
+                await _send_handoff_started(websocket, sessions_store, session_id, session["reason"])
                 await ws_manager.broadcast({
                     "type": "NEW_ESCALATION",
                     "payload": {

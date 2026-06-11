@@ -15,7 +15,7 @@ Routes:
 import uuid
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -30,6 +30,72 @@ from fastapi.security import HTTPAuthorizationCredentials
 logger = logging.getLogger("I-Way-Twin")
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
+
+
+# --- Time helpers (timezone-aware UTC) ---
+# created_at must be tz-aware UTC so the browser parses an explicit offset and
+# computes wait-times correctly regardless of the agent's local timezone (a
+# naive isoformat is parsed as browser-local time → wrong age / false "overdue").
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat()
+
+def _parse_dt(value: str) -> datetime:
+    """Parse an ISO timestamp; treat a naive (offset-less) value as UTC."""
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return _utc_now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+# --- client-context normalizers ---
+# The SOAP mappers (iway_soap_client) and the demo mocks (lookups) use different
+# key names than the agent dossier UI. These map the typed contrat + untyped
+# reimbursement rows onto the single shape the template binds to, so the panel
+# is populated in BOTH mock and real mode (real mode was previously blank).
+
+def _pick(row: dict, *cands):
+    """First non-empty value among candidate keys (case-insensitive)."""
+    low = {str(k).lower(): v for k, v in row.items()}
+    for c in cands:
+        v = low.get(c)
+        if v not in (None, ""):
+            return v
+    return None
+
+def _norm_real_contrat(contrat: Optional[dict], totaux: dict) -> Optional[dict]:
+    if not isinstance(contrat, dict):
+        return None
+    return {
+        "num_police": contrat.get("num_police"),
+        "num_contrat": contrat.get("num_contrat"),
+        "produit": contrat.get("type_remboursement"),
+        "statut": contrat.get("situation"),
+        "titulaire": contrat.get("titulaire"),
+        "plafond_annuel": None,  # not exposed by the contrat DTO
+        "consomme_annuel": (totaux or {}).get("total_rembourse"),
+    }
+
+def _norm_real_dossier_row(row) -> dict:
+    """Best-effort map an untyped SOAP reimbursement row onto the UI shape.
+    Keys are validated against the live ERP; structural fields survive the
+    _project_row whitelist (num*/statut/mnt*/date*) while names are stripped."""
+    if not isinstance(row, dict):
+        return {}
+    return {
+        "id": _pick(row, "numdossier", "num_dossier", "numero", "reference", "ref"),
+        "type": _pick(row, "type", "nature", "libelle", "acte"),
+        "montant": _pick(row, "montant", "mnttotal", "mnt", "total", "mntdossier"),
+        "status": _pick(row, "statut", "status", "etat"),
+        "date_soins": _pick(row, "datesoins", "datedossier", "date"),
+        "montant_rembourse": _pick(row, "mntrembourse", "montantrembourse", "rembourse"),
+    }
 
 # --- In-memory session store ---
 SESSIONS: Dict[str, Dict[str, Any]] = {}
@@ -106,7 +172,7 @@ async def create_session(
         "user_role": user.get("role", "Unknown"),
         "status": "active",
         "history": [],
-        "created_at": datetime.now().isoformat(),
+        "created_at": _utc_now_iso(),
         "agent_matricule": None,
         "user_ws": None,
         "agent_ws": None,
@@ -170,7 +236,7 @@ async def get_user_chats(
     Auto-cleans empty sessions older than 5 minutes to prevent ghost chats
     from accumulating when users refresh the page.
     """
-    now = datetime.now()
+    now = _utc_now()
     empty_session_ttl_seconds = 300  # 5 minutes
 
     # ── Database Hydration ──
@@ -220,7 +286,7 @@ async def get_user_chats(
             continue
         if len(s["history"]) == 0 and s["status"] == "active":
             try:
-                created = datetime.fromisoformat(s["created_at"])
+                created = _parse_dt(s["created_at"])
                 age_seconds = (now - created).total_seconds()
                 if age_seconds > empty_session_ttl_seconds:
                     stale_ids.append(sid)
@@ -293,8 +359,8 @@ async def get_session_briefing(session_id: str, matricule: str = Depends(get_cur
 
     # Calculate duration
     try:
-        created = datetime.fromisoformat(session["created_at"])
-        duration_minutes = int((datetime.now() - created).total_seconds() / 60)
+        created = _parse_dt(session["created_at"])
+        duration_minutes = int((_utc_now() - created).total_seconds() / 60)
     except Exception:
         duration_minutes = 0
 
@@ -622,12 +688,24 @@ async def get_client_context(
     benef = _ok(benef, "beneficiaires")
     recl = _ok(recl, "reclamations")
 
+    # Normalize the SOAP shapes onto the UI shape (contrat + reimbursement rows
+    # use different keys than the template; bénéficiaires/réclamations already
+    # match — nom/lien and numero/objet/statut).
+    totaux = (remb or {}).get("totaux") or {}
+    remboursements = None
+    if remb is not None:
+        remboursements = {
+            "dossiers": [_norm_real_dossier_row(r) for r in (remb.get("dossiers") or [])],
+            "total_rembourse_2026": totaux.get("total_rembourse"),
+            "plafond_annuel": None,
+        }
+
     return {
         "mode": "real",
         "matricule": target,
         "errors": errors,
-        "contrat": contrat,
-        "remboursements": remb,
+        "contrat": _norm_real_contrat(contrat, totaux),
+        "remboursements": remboursements,
         "beneficiaires": (
             {"beneficiaires": benef, "nombre_beneficiaires": len(benef)}
             if benef is not None else None
@@ -707,31 +785,13 @@ def _build_conversation_excerpt(history: list, max_messages: int = 10) -> str:
 
 
 def _build_llm(temperature: float = 0.1):
-    """Construct the chat LLM (local Ollama or Gemini).
+    """Construct the chat LLM for the briefing summary + agent co-pilot.
 
-    Shared by the briefing summary and the agent co-pilot so both stay on the
-    same model/config and we don't duplicate the construction logic.
+    Delegates to the graph's llm_factory so model selection (local Ollama vs
+    Gemini) lives in ONE place — see backend/domain/graph/llm_factory.py.
     """
-    from backend.config import get_settings
-    settings = get_settings()
-
-    # Same LLM patterns as agent.py to avoid import/config mismatches
-    if settings.USE_LOCAL_LLM:
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(
-            base_url=settings.OLLAMA_BASE_URL,
-            api_key="ollama",
-            model=settings.OLLAMA_MODEL,
-            temperature=temperature,
-        )
-
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    import os
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=os.getenv("GOOGLE_API_KEY", ""),
-        temperature=temperature,
-    )
+    from backend.domain.graph.llm_factory import build_llm
+    return build_llm(temperature=temperature)
 
 
 async def _generate_briefing_summary(
