@@ -24,9 +24,11 @@ settings = get_settings()
 # message stays neutral and professional (no fake "position dans la file : 1",
 # which the node cannot know: the real queue position is computed in
 # chat_service from the live session store and sent in the handoff banner).
+# Word-boundary anchors on the short, embeddable stems (`nul`, `marre`) so they
+# don't false-match inside calm words like "annuler"/"annulation"/"démarrer".
 _FRUSTRATION_RE = re.compile(
     r"(frustr|[ée]nerv|inadmissible|scandaleu|honteu|inacceptable|"
-    r"marre|ras[- ]le[- ]bol|col[èe]re|nul|lamentable|incompétent)",
+    r"\bmarre\b|ras[- ]le[- ]bol|col[èe]re|\bnulle?s?\b|lamentable|incomp[ée]tent)",
     re.IGNORECASE,
 )
 

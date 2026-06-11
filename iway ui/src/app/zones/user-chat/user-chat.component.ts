@@ -786,20 +786,24 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.loadChatThreads(); // Update sidebar
         break;
       case 'handoff_started':
+        const alreadyPending = this.isHandoffPending();
         this.isHandoffActive.set(true);
         this.isHandoffPending.set(true);
         this.isThinking.set(false);
         this.handoffPosition.set(msg.queue_position ?? null);
         this.handoffWaitMin.set(msg.estimated_wait_min ?? null);
-        // Surface a clear notification (the banner alone is easy to miss).
-        this.toastService.show('Votre demande a été transmise à un conseiller', 'info');
-        // DON'T disable input — user can keep chatting!
-        this.messages.update(m => [...m, {
-          role: 'system',
-          content: msg.keep_chatting
-            ? 'Un agent va vous rejoindre bientôt. Vous pouvez continuer à poser des questions.'
-            : (msg.reason || 'Transfert vers un spécialiste...')
-        }]);
+        // Only announce once — re-escalation while already pending must not spam a
+        // second toast + system bubble (the banner already reflects the new position).
+        if (!alreadyPending) {
+          this.toastService.show('Votre demande a été transmise à un conseiller', 'info');
+          // DON'T disable input — user can keep chatting!
+          this.messages.update(m => [...m, {
+            role: 'system',
+            content: msg.keep_chatting
+              ? 'Un agent va vous rejoindre bientôt. Vous pouvez continuer à poser des questions.'
+              : (msg.reason || 'Transfert vers un spécialiste...')
+          }]);
+        }
         this.loadChatThreads();
         break;
       case 'agent_joined':

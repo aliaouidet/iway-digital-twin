@@ -395,11 +395,15 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
                 <!-- Briefing tab -->
                 <div *ngIf="contextTab() === 'briefing'">
-                  <div *ngIf="briefingLoading() || !briefing()" class="flex items-center gap-2 px-4 py-4">
+                  <div *ngIf="briefingLoading()" class="flex items-center gap-2 px-4 py-4">
                     <div class="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                     <span class="text-xs text-indigo-600 dark:text-indigo-400">Génération du résumé...</span>
                   </div>
-                  <div *ngIf="briefing()" class="px-4 py-4">
+                  <div *ngIf="!briefingLoading() && briefingError()" class="px-4 py-4">
+                    <p class="text-xs text-rose-600 dark:text-rose-400 mb-2">Le résumé n'a pas pu être généré.</p>
+                    <button (click)="retryContext()" type="button" class="px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer transition-all active:scale-95 bg-indigo-600 hover:bg-indigo-500 text-white">Réessayer</button>
+                  </div>
+                  <div *ngIf="!briefingLoading() && !briefingError() && briefing()" class="px-4 py-4">
               <!-- Client Info + Stats Row -->
               <div class="flex items-start gap-4 mb-3">
                 <div class="flex-1">
@@ -532,7 +536,12 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <span class="text-xs text-cyan-600 dark:text-cyan-400">Chargement du dossier client...</span>
                   </div>
 
-                  <div *ngIf="!clientLoading() && clientContext()" class="px-4 py-4 space-y-3">
+                  <div *ngIf="!clientLoading() && clientError()" class="px-4 py-4">
+                    <p class="text-xs text-rose-600 dark:text-rose-400 mb-2">Le dossier client n'a pas pu être chargé.</p>
+                    <button (click)="retryContext()" type="button" class="px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer transition-all active:scale-95 bg-cyan-600 hover:bg-cyan-500 text-white">Réessayer</button>
+                  </div>
+
+                  <div *ngIf="!clientLoading() && !clientError() && clientContext()" class="px-4 py-4 space-y-3">
                     <!-- Per-section outage notice (real mode honest degradation) -->
                     <div *ngIf="clientContextErrors().length > 0" class="px-3 py-2 rounded-lg text-[10px] bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20">
                       Sections temporairement indisponibles : {{clientContextErrors().join(', ')}}
@@ -748,6 +757,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   // Briefing
   briefing = signal<Briefing | null>(null);
   briefingLoading = signal(false);
+  briefingError = signal(false);
   showClarifyInput = signal(false);
   clarifyText = '';
 
@@ -769,6 +779,10 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   // ─── Client dossier panel ───
   clientContext = signal<any | null>(null);
   clientLoading = signal(false);
+  clientError = signal(false);
+
+  // Per-session chat socket connection state (drives safe agent sends).
+  sessionWsConnected = signal(false);
 
   // ─── Quick-reply macros (agent canned answers) ───
   quickReplies: { label: string; text: string }[] = [
@@ -825,7 +839,11 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.wsService.connect(token || undefined);
 
     // Tick the wait-time clock so queue timers stay fresh without a reload.
-    this.clockTimer = setInterval(() => this.clock.set(Date.now()), 30000);
+    // Refresh the relative wait-time labels, but skip the work when the tab is
+    // hidden (no point re-rendering the queue for a backgrounded agent).
+    this.clockTimer = setInterval(() => {
+      if (!document.hidden) this.clock.set(Date.now());
+    }, 30000);
 
     this.eventSub = this.wsService.getMessages().subscribe(msg => {
       if (msg.type === 'NEW_ESCALATION') {
@@ -910,10 +928,13 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     // Context drawer + its data are per-session — close & clear, lazy-load on demand.
     this.contextTab.set(null);
     this.briefing.set(null);
+    this.briefingError.set(false);
     this.clientContext.set(null);
+    this.clientError.set(false);
     this.showClarifyInput.set(false);
     this.clarifyText = '';
     this.lastSuggestionGrounded.set(null);
+    this.sessionWsConnected.set(false);
     this.loadHistory(item.id);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
@@ -971,12 +992,13 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     const session = this.activeSession();
     if (!session) return;
     this.briefingLoading.set(true);
+    this.briefingError.set(false);
     this.http.get<Briefing>(`${environment.apiUrl}/api/v1/sessions/${session.id}/briefing`).subscribe({
       next: (data) => {
         this.briefing.set(data);
         this.briefingLoading.set(false);
       },
-      error: () => this.briefingLoading.set(false)
+      error: () => { this.briefingLoading.set(false); this.briefingError.set(true); }
     });
   }
 
@@ -1049,7 +1071,10 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
         url: wsUrl,
         deserializer: (e) => JSON.parse(e.data),
         openObserver: {
-          next: () => socket.next({ type: 'agent_connect' })
+          next: () => { socket.next({ type: 'agent_connect' }); this.sessionWsConnected.set(true); }
+        },
+        closeObserver: {
+          next: () => this.sessionWsConnected.set(false)
         },
       });
       this.sessionSocket$ = socket;
@@ -1068,6 +1093,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       catchError(err => {
         console.error('[Agent WS] Fatal error:', err);
         this.sessionSocket$ = null;
+        this.sessionWsConnected.set(false);
         this.toastService.show('Connexion à la session perdue — re-sélectionnez la session.', 'error');
         return EMPTY;
       }),
@@ -1083,20 +1109,16 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   sendAgentMessage(): void {
     if (!this.agentMessage.trim()) return;
-    if (!this.sessionSocket$) {
-      // Never fail silently — the agent must know the message did not go out.
+    // Guard on the real socket OPEN state: RxJS WebSocketSubject.next() does not
+    // throw when the socket is closed (it buffers/drops), so a try/catch can't
+    // catch a dropped send — checking sessionWsConnected prevents echoing a
+    // "sent" bubble the client will never receive.
+    if (!this.sessionSocket$ || !this.sessionWsConnected()) {
       this.toastService.show('Connexion à la session inactive — re-sélectionnez la session.', 'error');
       return;
     }
     const content = this.agentMessage.trim();
-    // Send first: only echo into the history once it's actually on the wire,
-    // so a failed send doesn't leave a phantom "sent" message in the thread.
-    try {
-      this.sessionSocket$.next({ type: 'agent_message', content });
-    } catch {
-      this.toastService.show("Échec de l'envoi — re-sélectionnez la session.", 'error');
-      return;
-    }
+    this.sessionSocket$.next({ type: 'agent_message', content });
     this.agentMessage = '';
     this.lastSuggestionGrounded.set(null);
     this.resetAgentInputHeight();
@@ -1149,13 +1171,22 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     const session = this.activeSession();
     if (!session) return;
     this.clientLoading.set(true);
+    this.clientError.set(false);
     this.http.get<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/client-context`).subscribe({
       next: (data) => { this.clientContext.set(data); this.clientLoading.set(false); },
       error: () => {
         this.clientLoading.set(false);
+        this.clientError.set(true);
         this.toastService.show('Dossier client indisponible', 'error');
       },
     });
+  }
+
+  /** Retry button for the drawer error states. */
+  retryContext(): void {
+    const tab = this.contextTab();
+    if (tab === 'briefing') this.loadBriefing();
+    else if (tab === 'dossier') this.loadClientContext();
   }
 
   clientContextErrors(): string[] {
@@ -1194,12 +1225,15 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   @HostListener('document:keydown', ['$event'])
   onGlobalKeydown(event: KeyboardEvent): void {
-    // Don't hijack typing or shortcuts in fields.
+    if (event.key !== 'j' && event.key !== 'k') return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // Don't hijack typing in fields.
     const target = event.target as HTMLElement;
     const tag = target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key !== 'j' && event.key !== 'k') return;
+    // Don't navigate away (and tear down session state) while a dialog/modal with
+    // in-progress input is open — that would silently discard the agent's work.
+    if (this.showResolveDialog() || this.showKnowledgeModal() || this.showClarifyInput()) return;
 
     const items = this.filteredQueue();
     if (items.length === 0) return;
@@ -1349,11 +1383,14 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.hasTakenOver.set(false);
     this.contextTab.set(null);
     this.briefing.set(null);
+    this.briefingError.set(false);
     this.saveToKnowledge = false;
     this.resolveTags = '';
     this.extractedPairs.set([]);
     this.clientContext.set(null);
+    this.clientError.set(false);
     this.lastSuggestionGrounded.set(null);
+    this.sessionWsConnected.set(false);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
   }
