@@ -168,6 +168,15 @@ app.add_middleware(
         "http://127.0.0.1:4200",
         "http://localhost:8000",       # Swagger UI (same-origin)
     ],
+    # On-prem deploy: the app is opened at http://<server-lan-ip>:4200 and calls the API
+    # at http://<server-lan-ip>:8000 — a cross-origin request. Allow any private-LAN host
+    # (RFC1918 + localhost) on the app/API ports so it works without per-IP edits.
+    allow_origin_regex=(
+        r"http://(localhost|127\.0\.0\.1|"
+        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+        r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
+        r"192\.168\.\d{1,3}\.\d{1,3}):(4200|8000)"
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
