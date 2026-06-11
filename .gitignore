@@ -10,7 +10,8 @@ ENV/
 
 # Environment variables
 .env
-
+.claude/
+CLAUDE.md
 
 # Distribution / packaging
 dist/
@@ -61,12 +62,12 @@ celerybeat-schedule.*
 celerybeat.pid
 # folders
 .agents
-
+Webservices/
 .Webservices/
 CLAUDE.md
 # rapport
 rapport_pfe
-
+ws/
 # Scratch SOAP-probe scripts (local dev only — not deployed)
 call_all_ws.py
 download_ws.py
