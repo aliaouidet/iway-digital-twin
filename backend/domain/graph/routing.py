@@ -12,7 +12,7 @@ import re
 import logging
 from typing import Literal, Optional
 
-from state import ClaimsGraphState, ClaimIntent
+from backend.domain.state import ClaimsGraphState, ClaimIntent
 
 logger = logging.getLogger("I-Way-Twin")
 

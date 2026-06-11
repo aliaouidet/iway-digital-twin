@@ -7,12 +7,17 @@ sensitive events (escalations, pipeline traces) are only sent to
 authorized Agent/Admin connections — never to regular Adherent clients.
 """
 
+import asyncio
 import logging
 from typing import Optional, Set
 
 from fastapi import WebSocket
 
 logger = logging.getLogger("I-Way-Twin")
+
+# A single slow/half-dead consumer must not stall escalation notifications for
+# everyone — each send gets its own deadline.
+_SEND_TIMEOUT_SECONDS = 2.0
 
 
 class ConnectionManager:
@@ -22,9 +27,15 @@ class ConnectionManager:
         # Each entry: {"ws": WebSocket, "role": str, "matricule": str}
         self.active_connections: list[dict] = []
 
-    async def connect(self, websocket: WebSocket, role: str = "Adherent", matricule: str = ""):
-        """Accept and register a WebSocket with its verified JWT role."""
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket, role: str = "Adherent", matricule: str = "",
+                      accepted: bool = False):
+        """Register a WebSocket with its verified JWT role.
+
+        `accepted=True` means the endpoint already accepted the socket (the
+        first-frame auth handshake accepts before validating) — don't re-accept.
+        """
+        if not accepted:
+            await websocket.accept()
         self.active_connections.append({
             "ws": websocket,
             "role": role,
@@ -56,30 +67,31 @@ class ConnectionManager:
                           will receive the message. If None, all connections
                           receive it (backward-compatible default).
 
-        Automatically removes dead connections on send failure
-        to prevent memory leaks from accumulated stale references.
+        Sends run CONCURRENTLY with a per-send timeout — a single slow consumer
+        no longer head-of-line-blocks every other recipient. Dead connections
+        are removed on failure to prevent stale-reference leaks.
         """
-        dead_connections = []
-        sent_count = 0
+        targets = [
+            conn for conn in list(self.active_connections)
+            if not target_roles or conn["role"] in target_roles
+        ]
+        if not targets:
+            return
 
-        for conn in list(self.active_connections):
-            # Role filter: skip connections that don't match target roles
-            if target_roles and conn["role"] not in target_roles:
-                continue
+        async def _send(conn):
+            await asyncio.wait_for(conn["ws"].send_json(message), timeout=_SEND_TIMEOUT_SECONDS)
 
-            try:
-                await conn["ws"].send_json(message)
-                sent_count += 1
-            except Exception:
-                dead_connections.append(conn)
+        results = await asyncio.gather(*(_send(c) for c in targets), return_exceptions=True)
 
-        # Clean up dead connections after iteration
+        dead_connections = [c for c, r in zip(targets, results) if isinstance(r, BaseException)]
+        sent_count = len(targets) - len(dead_connections)
+
         if dead_connections:
             for dead in dead_connections:
                 if dead in self.active_connections:
                     self.active_connections.remove(dead)
             logger.info(
-                f"🧹 Removed {len(dead_connections)} dead WebSocket connection(s). "
+                f"🧹 Removed {len(dead_connections)} dead/stalled WebSocket connection(s). "
                 f"Active: {len(self.active_connections)}"
             )
 

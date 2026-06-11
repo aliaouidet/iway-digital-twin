@@ -29,8 +29,11 @@ async def persist_message(
         async with async_session_factory() as db:
             await save_message(db, session_id, role, content, confidence, model_used)
             await db.commit()
+        from backend.services.persistence_health import record_persist_success
+        record_persist_success()
     except Exception as e:
-        logger.debug(f"Message DB persist skipped: {e}")
+        from backend.services.persistence_health import record_persist_failure
+        record_persist_failure("message", e)
 
 
 async def persist_escalation(session_id: str, reason: str):
@@ -45,8 +48,11 @@ async def persist_escalation(session_id: str, reason: str):
                 reason=reason,
             )
             await db.commit()
+        from backend.services.persistence_health import record_persist_success
+        record_persist_success()
     except Exception as e:
-        logger.debug(f"Escalation DB persist skipped: {e}")
+        from backend.services.persistence_health import record_persist_failure
+        record_persist_failure("escalation", e)
 
 
 def build_agent_messages(session: dict, handoff_mode: bool = False, max_turns: int = 10):

@@ -613,15 +613,17 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
    *  pick up a re-issued token (e.g. after re-login in another tab). */
   private createSocket(): WebSocketSubject<any> {
     const token = this.authService.getToken() || '';
-    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${this.sessionId}?token=${token}`;
+    // Token travels in the FIRST frame, not the URL — query strings leak into
+    // proxy logs and browser history.
+    const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${this.sessionId}`;
 
     const socket: WebSocketSubject<any> = webSocket<any>({
       url: wsUrl,
       deserializer: (e) => JSON.parse(e.data),
       openObserver: {
         next: () => {
-          console.log('[UserChat WS] Connection opened, sending user_connect');
-          // Send user_connect AFTER the WS is confirmed open
+          // Auth handshake first, then announce ourselves.
+          socket.next({ type: 'auth', token });
           socket.next({ type: 'user_connect' });
           // Start heartbeat
           this.startPing();

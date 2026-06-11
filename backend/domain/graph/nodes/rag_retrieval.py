@@ -12,7 +12,7 @@ instead of the child chunk, ensuring complete context.
 
 import logging
 
-from state import ClaimsGraphState, RetrievedDoc
+from backend.domain.state import ClaimsGraphState, RetrievedDoc
 
 logger = logging.getLogger("I-Way-Twin")
 

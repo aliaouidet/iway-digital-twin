@@ -27,12 +27,16 @@ export class WebSocketService implements OnDestroy {
   /** Built fresh per connection attempt so retries pick up a re-issued token. */
   private createSocket(fallbackToken?: string): WebSocketSubject<WsMessage> {
     const token = this.authService.getToken() || fallbackToken;
-    const wsUrl = token ? `${environment.wsUrl}?token=${token}` : environment.wsUrl;
-
-    const socket = webSocket<WsMessage>({
-      url: wsUrl,
+    // Token travels in the FIRST frame, not the URL — query strings leak into
+    // proxy logs and browser history.
+    const socket: WebSocketSubject<WsMessage> = webSocket<WsMessage>({
+      url: environment.wsUrl,
       openObserver: {
-        next: () => console.log('[WebSocket] Connected')
+        next: () => {
+          if (token) {
+            socket.next({ type: 'auth', token } as unknown as WsMessage);
+          }
+        }
       },
       closeObserver: {
         next: (event: CloseEvent) => {

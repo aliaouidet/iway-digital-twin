@@ -1,0 +1,32 @@
+# Minimal CI for the on-LAN GitLab (debian-7-px) — runs the offline test
+# suites + the frontend build on every push, so regressions are caught before
+# they reach the deploy VM.
+
+stages:
+  - test
+
+backend-tests:
+  stage: test
+  image: python:3.11-slim
+  variables:
+    GOOGLE_API_KEY: "offline"
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+  cache:
+    key: pip-$CI_COMMIT_REF_SLUG
+    paths:
+      - .pip-cache/
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
+    - pip install torch --index-url https://download.pytorch.org/whl/cpu
+    - pip install -r requirements.txt pytest
+  script:
+    # Offline suites only — live-env scripts (test_api.py etc.) need the stack.
+    - python -m pytest tests/test_invariants.py tests/test_iway_soap_client.py -v
+
+frontend-build:
+  stage: test
+  image: node:20-alpine
+  script:
+    - cd "iway ui"
+    - npm ci
+    - npx ng build --configuration production

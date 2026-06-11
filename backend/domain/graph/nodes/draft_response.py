@@ -12,7 +12,7 @@ import logging
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from state import ClaimsGraphState
+from backend.domain.state import ClaimsGraphState
 from backend.domain.graph.llm_factory import llm
 from backend.services.conversation_memory import build_conversation_context
 from backend.services.input_sanitizer import wrap_user_message

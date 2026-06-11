@@ -1066,12 +1066,17 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     // Built fresh per attempt so reconnects pick up a re-issued token.
     const createSocket = () => {
       const token = this.authService.getToken();
-      const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${sessionId}?token=${token}`;
+      // Token travels in the FIRST frame, not the URL (no proxy-log leakage).
+      const wsUrl = `${environment.wsUrl.replace('/events', '')}/chat/${sessionId}`;
       const socket: WebSocketSubject<any> = webSocket<any>({
         url: wsUrl,
         deserializer: (e) => JSON.parse(e.data),
         openObserver: {
-          next: () => { socket.next({ type: 'agent_connect' }); this.sessionWsConnected.set(true); }
+          next: () => {
+            socket.next({ type: 'auth', token });
+            socket.next({ type: 'agent_connect' });
+            this.sessionWsConnected.set(true);
+          }
         },
         closeObserver: {
           next: () => this.sessionWsConnected.set(false)

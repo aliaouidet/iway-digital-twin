@@ -9,7 +9,7 @@ import logging
 
 from langchain_core.messages import AIMessage
 
-from state import ClaimsGraphState
+from backend.domain.state import ClaimsGraphState
 
 logger = logging.getLogger("I-Way-Twin")
 

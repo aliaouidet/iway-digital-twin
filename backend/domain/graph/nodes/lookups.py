@@ -10,7 +10,7 @@ conversation degrades gracefully rather than breaking (QR3).
 import asyncio
 import logging
 
-from state import ClaimsGraphState
+from backend.domain.state import ClaimsGraphState
 from backend.config import get_settings
 
 logger = logging.getLogger("I-Way-Twin")

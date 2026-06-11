@@ -11,7 +11,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage
 
-from state import ClaimsGraphState, ClaimDetails
+from backend.domain.state import ClaimsGraphState, ClaimDetails
 from backend.domain.graph.llm_factory import llm
 
 logger = logging.getLogger("I-Way-Twin")

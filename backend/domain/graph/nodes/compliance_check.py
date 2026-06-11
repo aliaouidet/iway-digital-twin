@@ -15,7 +15,7 @@ import re
 import logging
 from typing import List
 
-from state import ClaimsGraphState
+from backend.domain.state import ClaimsGraphState
 
 logger = logging.getLogger("I-Way-Twin")
 

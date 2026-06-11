@@ -27,6 +27,17 @@ from backend.database.repositories import get_user_sessions, get_session_message
 from backend.routers.auth import get_current_user, MOCK_USERS, bearer_scheme
 from fastapi.security import HTTPAuthorizationCredentials
 
+from backend.services.session_store import SESSIONS  # single owner of session state
+from backend.services.persistence_health import record_persist_failure, record_persist_success
+from backend.services.agent_assist import (
+    generate_briefing_summary,
+    generate_reply_suggestion,
+    extract_topics,
+    build_conversation_excerpt,
+    norm_real_contrat,
+    norm_real_dossier_row,
+)
+
 logger = logging.getLogger("I-Way-Twin")
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
@@ -54,52 +65,7 @@ def _parse_dt(value: str) -> datetime:
     return dt
 
 
-# --- client-context normalizers ---
-# The SOAP mappers (iway_soap_client) and the demo mocks (lookups) use different
-# key names than the agent dossier UI. These map the typed contrat + untyped
-# reimbursement rows onto the single shape the template binds to, so the panel
-# is populated in BOTH mock and real mode (real mode was previously blank).
-
-def _pick(row: dict, *cands):
-    """First non-empty value among candidate keys (case-insensitive)."""
-    low = {str(k).lower(): v for k, v in row.items()}
-    for c in cands:
-        v = low.get(c)
-        if v not in (None, ""):
-            return v
-    return None
-
-def _norm_real_contrat(contrat: Optional[dict], totaux: dict) -> Optional[dict]:
-    if not isinstance(contrat, dict):
-        return None
-    return {
-        "num_police": contrat.get("num_police"),
-        "num_contrat": contrat.get("num_contrat"),
-        "produit": contrat.get("type_remboursement"),
-        "statut": contrat.get("situation"),
-        "titulaire": contrat.get("titulaire"),
-        "plafond_annuel": None,  # not exposed by the contrat DTO
-        "consomme_annuel": (totaux or {}).get("total_rembourse"),
-    }
-
-def _norm_real_dossier_row(row) -> dict:
-    """Best-effort map an untyped SOAP reimbursement row onto the UI shape.
-    Keys are validated against the live ERP; structural fields survive the
-    _project_row whitelist (num*/statut/mnt*/date*) while names are stripped."""
-    if not isinstance(row, dict):
-        return {}
-    return {
-        "id": _pick(row, "numdossier", "num_dossier", "numero", "reference", "ref"),
-        "type": _pick(row, "type", "nature", "libelle", "acte"),
-        "montant": _pick(row, "montant", "mnttotal", "mnt", "total", "mntdossier"),
-        "status": _pick(row, "statut", "status", "etat"),
-        "date_soins": _pick(row, "datesoins", "datedossier", "date"),
-        "montant_rembourse": _pick(row, "mntrembourse", "montantrembourse", "rembourse"),
-    }
-
-# --- In-memory session store ---
-SESSIONS: Dict[str, Dict[str, Any]] = {}
-
+# client-context normalizers live in backend/services/agent_assist.py
 
 # --- WebSocket Manager reference (set by main.py) ---
 class _WSManagerRef:
@@ -164,10 +130,15 @@ async def create_session(
     """Create a new chat session for a user."""
     session_id = str(uuid.uuid4())
     user = MOCK_USERS.get(matricule, {})
+    from backend.config import get_settings as _gs
+    # The raw JWT is only needed by the MOCK REST client (graph lookups call the
+    # in-process mock API with the user's bearer). In real-SOAP mode the SOAP
+    # client authenticates itself — never hold the user's credential server-side.
+    _store_token = not _gs().IWAY_USE_REAL_API
     SESSIONS[session_id] = {
         "id": session_id,
         "user_matricule": matricule,
-        "user_token": credentials.credentials,
+        "user_token": credentials.credentials if _store_token else "",
         "user_name": f"{user.get('prenom', '')} {user.get('nom', '')}".strip(),
         "user_role": user.get("role", "Unknown"),
         "status": "active",
@@ -355,7 +326,7 @@ async def get_session_briefing(session_id: str, matricule: str = Depends(get_cur
 
     # Extract key topics from user messages
     all_user_text = " ".join(m["content"] for m in user_messages)
-    topics = _extract_topics(all_user_text)
+    topics = extract_topics(all_user_text)
 
     # Calculate duration
     try:
@@ -373,10 +344,10 @@ async def get_session_briefing(session_id: str, matricule: str = Depends(get_cur
                 break
 
     # Build conversation excerpt for LLM summary
-    conversation_excerpt = _build_conversation_excerpt(history, max_messages=10)
+    conversation_excerpt = build_conversation_excerpt(history, max_messages=10)
 
     # Generate LLM summary (async)
-    ai_summary = await _generate_briefing_summary(
+    ai_summary = await generate_briefing_summary(
         session["user_name"],
         session["user_role"],
         session["reason"],
@@ -601,10 +572,10 @@ async def suggest_reply(
         logger.warning(f"⚠️ Suggest RAG retrieval failed: {e}")
 
     kb_context = "\n\n".join(f"- {d.get('chunk_text', '')}" for d in docs)[:3000]
-    excerpt = _build_conversation_excerpt(history, max_messages=8)
+    excerpt = build_conversation_excerpt(history, max_messages=8)
 
     try:
-        suggestion = await _generate_reply_suggestion(
+        suggestion = await generate_reply_suggestion(
             query, kb_context, excerpt,
             body.instruction if body else None,
         )
@@ -695,7 +666,7 @@ async def get_client_context(
     remboursements = None
     if remb is not None:
         remboursements = {
-            "dossiers": [_norm_real_dossier_row(r) for r in (remb.get("dossiers") or [])],
+            "dossiers": [norm_real_dossier_row(r) for r in (remb.get("dossiers") or [])],
             "total_rembourse_2026": totaux.get("total_rembourse"),
             "plafond_annuel": None,
         }
@@ -704,7 +675,7 @@ async def get_client_context(
         "mode": "real",
         "matricule": target,
         "errors": errors,
-        "contrat": _norm_real_contrat(contrat, totaux),
+        "contrat": norm_real_contrat(contrat, totaux),
         "remboursements": remboursements,
         "beneficiaires": (
             {"beneficiaires": benef, "nombre_beneficiaires": len(benef)}
@@ -715,180 +686,6 @@ async def get_client_context(
             if recl is not None else None
         ),
     }
-
-
-# ==============================================================
-# HELPER FUNCTIONS
-# ==============================================================
-
-def _extract_topics(text: str) -> list:
-    """Extract key topics/keywords from user messages."""
-    # Insurance-domain keyword extraction
-    topic_keywords = {
-        "remboursement": "Remboursement",
-        "rembourse": "Remboursement",
-        "dentaire": "Soins dentaires",
-        "dent": "Soins dentaires",
-        "optique": "Optique",
-        "lunette": "Optique",
-        "hospitalisation": "Hospitalisation",
-        "hopital": "Hospitalisation",
-        "urgence": "Urgences",
-        "maternite": "Maternité",
-        "naissance": "Maternité",
-        "grossesse": "Maternité",
-        "beneficiaire": "Bénéficiaires",
-        "enfant": "Bénéficiaires",
-        "conjoint": "Bénéficiaires",
-        "carte": "Carte adhérent",
-        "adherent": "Adhésion",
-        "cotisation": "Cotisations",
-        "prime": "Primes",
-        "reclamation": "Réclamation",
-        "plainte": "Réclamation",
-        "medicament": "Pharmacie",
-        "pharmacie": "Pharmacie",
-        "consultation": "Consultation",
-        "medecin": "Consultation",
-        "kine": "Kinésithérapie",
-        "labo": "Analyses",
-        "analyse": "Analyses",
-        "radio": "Imagerie",
-        "irm": "Imagerie",
-        "scanner": "Imagerie",
-        "vaccin": "Vaccination",
-        "dossier": "Dossiers",
-        "prestation": "Prestations",
-        "facture": "Facturation",
-    }
-    text_lower = text.lower()
-    found = set()
-    for keyword, topic in topic_keywords.items():
-        if keyword in text_lower:
-            found.add(topic)
-    return list(found)[:6]  # Max 6 topics
-
-
-def _build_conversation_excerpt(history: list, max_messages: int = 10) -> str:
-    """Build a text excerpt of the conversation for LLM summarization."""
-    recent = history[-max_messages:] if len(history) > max_messages else history
-    lines = []
-    for msg in recent:
-        role_label = {
-            "user": "Client",
-            "assistant": "IA",
-            "agent": "Agent",
-            "system": "Système"
-        }.get(msg["role"], msg["role"])
-        lines.append(f"{role_label}: {msg['content']}")
-    return "\n".join(lines)
-
-
-def _build_llm(temperature: float = 0.1):
-    """Construct the chat LLM for the briefing summary + agent co-pilot.
-
-    Delegates to the graph's llm_factory so model selection (local Ollama vs
-    Gemini) lives in ONE place — see backend/domain/graph/llm_factory.py.
-    """
-    from backend.domain.graph.llm_factory import build_llm
-    return build_llm(temperature=temperature)
-
-
-async def _generate_briefing_summary(
-    user_name: str,
-    user_role: str,
-    reason: str,
-    conversation_excerpt: str,
-) -> str:
-    """Generate an LLM summary of the conversation for the agent briefing."""
-    try:
-        llm = _build_llm(temperature=0.1)
-
-        from langchain_core.messages import HumanMessage, SystemMessage
-
-        prompt = f"""Tu es un assistant interne pour les agents du support I-Santé.
-Génère un résumé concis (3-4 phrases) de cette conversation pour aider l'agent à comprendre rapidement la situation.
-
-Client: {user_name} ({user_role})
-Raison d'escalade: {reason or 'Non spécifiée'}
-
-Conversation:
-{conversation_excerpt[:3000]}
-
-Résumé pour l'agent (en français, 3-4 phrases max):"""
-
-        import asyncio
-        response = await asyncio.wait_for(
-            llm.ainvoke([
-                SystemMessage(content="Tu résumes des conversations client pour les agents de support."),
-                HumanMessage(content=prompt),
-            ]),
-            timeout=15.0,
-        )
-        return response.content.strip()
-
-    except Exception as e:
-        logger.warning(f"⚠️ Briefing summary generation failed: {e}")
-        # Fallback: simple extractive summary
-        return _fallback_summary(user_name, user_role, reason, conversation_excerpt)
-
-
-def _fallback_summary(user_name: str, user_role: str, reason: str, excerpt: str) -> str:
-    """Simple extractive summary when LLM is unavailable."""
-    lines = excerpt.split("\n")
-    client_lines = [l for l in lines if l.startswith("Client:")]
-    if client_lines:
-        first_q = client_lines[0].replace("Client: ", "")
-        summary = f"{user_name} ({user_role}) a contacté le support. "
-        summary += f"Question initiale : \"{first_q[:100]}\". "
-        if reason:
-            summary += f"Escaladé car : {reason}."
-        return summary
-    return f"{user_name} ({user_role}) a contacté le support. Raison: {reason or 'non spécifiée'}."
-
-
-async def _generate_reply_suggestion(
-    query: str,
-    kb_context: str,
-    conversation_excerpt: str,
-    instruction: Optional[str] = None,
-) -> str:
-    """Draft a candidate reply for the agent, grounded in the knowledge base.
-
-    Raises on failure so the endpoint can return 503 — a silent fallback would
-    risk the agent sending an ungrounded, possibly wrong answer to a client.
-    """
-    llm = _build_llm(temperature=0.2)
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    steer = f"\n\nConsigne de l'agent à respecter : {instruction}" if instruction else ""
-    prompt = f"""Tu rédiges une proposition de réponse pour un AGENT HUMAIN du support I-Santé, qui la relira et l'ajustera avant de l'envoyer au client.
-
-Règles :
-- Base-toi UNIQUEMENT sur le contexte ci-dessous et la conversation. N'invente jamais de montant, de date, de taux ni de décision.
-- Si l'information est insuffisante, dis-le honnêtement et propose la prochaine étape (pièce à fournir, vérification, délai).
-- Les montants sont en dinars tunisiens (TND).
-- Ton courtois et professionnel, en français, 2 à 5 phrases.
-
-Contexte (base de connaissances I-Santé) :
-{kb_context or "(aucun extrait pertinent trouvé)"}
-
-Conversation :
-{conversation_excerpt[:3000]}
-
-Dernière demande du client à traiter : {query}{steer}
-
-Proposition de réponse (prête à être relue par l'agent) :"""
-
-    response = await asyncio.wait_for(
-        llm.ainvoke([
-            SystemMessage(content="Tu assistes les agents du support en rédigeant des propositions de réponse fiables, sourcées et prudentes."),
-            HumanMessage(content=prompt),
-        ]),
-        timeout=20.0,
-    )
-    return response.content.strip()
 
 
 # ==============================================================
@@ -904,8 +701,9 @@ async def _persist_session_create(session_id: str, user_matricule: str):
         async with async_session_factory() as db:
             await db_create(db, session_id, user_matricule)
             await db.commit()
+        record_persist_success()
     except Exception as e:
-        logger.debug(f"Session DB persist skipped: {e}")
+        record_persist_failure("session_create", e)
 
 
 async def _persist_session_status(
@@ -924,5 +722,6 @@ async def _persist_session_status(
                 agent_matricule=agent_matricule,
             )
             await db.commit()
+        record_persist_success()
     except Exception as e:
-        logger.debug(f"Session status DB persist skipped: {e}")
+        record_persist_failure("session_status", e)

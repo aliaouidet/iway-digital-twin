@@ -15,7 +15,7 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage
 
-from state import ClaimsGraphState, ClaimIntent
+from backend.domain.state import ClaimsGraphState, ClaimIntent
 from backend.domain.graph.llm_factory import llm
 from backend.domain.graph.semantic_router import classify_intent
 

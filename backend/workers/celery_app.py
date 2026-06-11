@@ -49,6 +49,7 @@ celery_app.conf.update(
 celery_app.conf.include = [
     "backend.workers.sync_worker",
     "backend.workers.hitl_worker",
+    "backend.workers.maintenance_worker",
 ]
 
 
@@ -57,6 +58,13 @@ celery_app.conf.beat_schedule = {
     "sync-iway-knowledge": {
         "task": "backend.workers.sync_worker.sync_knowledge_base",
         "schedule": settings.SYNC_INTERVAL_MINUTES * 60,  # Convert to seconds
+        "options": {"queue": "default"},
+    },
+    # Nightly retention: LangGraph checkpoints of long-resolved sessions are
+    # pruned so the checkpoint tables don't grow unbounded.
+    "prune-old-checkpoints": {
+        "task": "backend.workers.maintenance_worker.prune_old_checkpoints",
+        "schedule": 24 * 3600,
         "options": {"queue": "default"},
     },
 }

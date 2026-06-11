@@ -37,6 +37,7 @@ rapport_pfe/
 
 # --- Secrets & local runtime artifacts (provided via compose env / bind mount at runtime) ---
 .env
+keys/
 celerybeat-schedule
 *.db
 *.sqlite3

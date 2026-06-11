@@ -8,7 +8,7 @@ missing information instead of silently handing off.
 
 import logging
 
-from state import ClaimsGraphState, ClaimDetails
+from backend.domain.state import ClaimsGraphState, ClaimDetails
 
 logger = logging.getLogger("I-Way-Twin")
 

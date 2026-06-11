@@ -330,6 +330,11 @@ def sync_knowledge_from_api(kb_items: List[Dict[str, Any]]) -> Dict[str, int]:
                 "chunk_index": chunk_idx,
                 "total_chunks": len(chunks),
                 "source_type": "iway_api",
+                # Embedding lifecycle: which model produced this vector and when —
+                # required to detect/migrate stale vectors after a model swap
+                # (see maintenance_worker.reembed_knowledge_base).
+                "embedding_model": settings.EMBEDDING_MODEL,
+                "embedded_at": datetime.now(timezone.utc).isoformat(),
             })
     
     logger.info(f"📝 Chunked {len(kb_items)} Q&A entries into {len(documents)} chunks")
@@ -416,6 +421,8 @@ def add_hitl_knowledge(session_id: str, question: str, answer: str,
         "tags": tags or [],
         "source_type": "hitl_validated",
         "source_id": source_id,
+        "embedding_model": settings.EMBEDDING_MODEL,
+        "embedded_at": datetime.now(timezone.utc).isoformat(),
     }
     
     # Try PGVector first
@@ -559,6 +566,8 @@ async def async_add_hitl_knowledge(
         "tags": tags or [],
         "source_type": "hitl_validated",
         "source_id": source_id,
+        "embedding_model": settings.EMBEDDING_MODEL,
+        "embedded_at": datetime.now(timezone.utc).isoformat(),
     }
 
     # Try PGVector first
