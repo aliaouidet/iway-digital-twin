@@ -65,14 +65,14 @@ interface ChatThread {
             </div>
           </div>
           <div class="flex items-center gap-1 z-10 relative">
-            <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
+            <button (click)="toggleTheme()" type="button" aria-label="Changer de thème" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
               <svg class="w-3.5 h-3.5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
               <svg class="w-3.5 h-3.5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
             </button>
-            <button (click)="logout()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hidden md:flex hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
+            <button (click)="logout()" type="button" aria-label="Se déconnecter" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hidden md:flex hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
             </button>
-            <button (click)="closeSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300">
+            <button (click)="closeSidebar()" type="button" aria-label="Fermer le menu" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -151,7 +151,7 @@ interface ChatThread {
         <!-- Header -->
         <header class="h-16 flex items-center justify-between px-4 md:px-6 border-b flex-shrink-0 transition-colors relative z-30 bg-white/80 border-slate-200 backdrop-blur-md dark:bg-[#0F172A]/80 dark:border-slate-800">
           <div class="flex items-center gap-2 md:gap-3 min-w-0">
-            <button (click)="toggleSidebar()" class="lg:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0 hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300">
+            <button (click)="toggleSidebar()" type="button" aria-label="Ouvrir le menu" class="lg:hidden p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer flex-shrink-0 hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300">
                 <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
             </button>
             <div class="w-8 h-8 md:w-9 md:h-9 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 flex-shrink-0">
@@ -160,8 +160,16 @@ interface ChatThread {
             <div class="truncate">
               <span class="text-sm md:text-base font-bold truncate text-slate-900 dark:text-white" style="font-family: 'Figtree', sans-serif;">I-Way Assistant</span>
               <div class="flex items-center gap-1.5">
-                <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" [class]="isConnected() ? 'bg-emerald-400' : 'bg-slate-400'"></span><span class="relative inline-flex rounded-full h-2 w-2" [class]="isConnected() ? 'bg-emerald-500' : 'bg-slate-500'"></span></span>
-                <span class="text-[9px] md:text-[10px] font-medium text-slate-400 dark:text-slate-500">{{isConnected() ? 'En ligne' : 'Connexion...'}}</span>
+                <span class="relative flex h-2 w-2">
+                  <span *ngIf="connectionState() === 'connecting'" class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-amber-400"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2"
+                    [ngClass]="{
+                      'bg-emerald-500': connectionState() === 'online',
+                      'bg-amber-500': connectionState() === 'connecting',
+                      'bg-slate-400 dark:bg-slate-500': connectionState() === 'idle'
+                    }"></span>
+                </span>
+                <span class="text-[9px] md:text-[10px] font-medium text-slate-400 dark:text-slate-500">{{connectionLabel()}}</span>
               </div>
             </div>
           </div>
@@ -171,7 +179,7 @@ interface ChatThread {
               <svg class="w-3.5 h-3.5 hidden md:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
               Parler à un agent
             </button>
-            <button (click)="logout()" class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
+            <button (click)="logout()" type="button" aria-label="Se déconnecter" class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
             </button>
           </div>
@@ -182,9 +190,12 @@ interface ChatThread {
           <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-amber-100 dark:bg-amber-500/20">
             <svg class="w-4 h-4 animate-pulse text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           </div>
-          <div>
-            <p class="text-xs font-semibold text-amber-800 dark:text-amber-300">
+          <div class="min-w-0">
+            <p class="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
               Un agent va vous rejoindre bientôt
+              <span *ngIf="handoffPosition()" class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+                Position {{handoffPosition()}}<span *ngIf="handoffWaitMin()"> · ≈ {{handoffWaitMin()}} min</span>
+              </span>
             </p>
             <p class="text-[10px] text-amber-600 dark:text-amber-400/70">
               Vous pouvez continuer à poser des questions en attendant.
@@ -215,14 +226,31 @@ interface ChatThread {
               <svg class="w-8 h-8 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
             </div>
             <h2 class="text-xl font-bold mb-2 text-slate-900 dark:text-white" style="font-family: 'Figtree', sans-serif;">Bienvenue sur I-Way Support</h2>
-            <p class="text-sm max-w-sm text-slate-500 dark:text-slate-500">
-              Posez vos questions sur la couverture, les remboursements ou toute question d'assurance.
+            <p class="text-sm max-w-md text-slate-500 dark:text-slate-500">
+              Posez une question générale, consultez votre dossier personnel, ou demandez un agent à tout moment.
             </p>
-            <div class="flex flex-wrap gap-2 mt-6 justify-center">
-              <button *ngFor="let q of quickQuestions" (click)="sendQuickQuestion(q)"
-                class="px-3.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 dark:border-slate-700">
-                {{q}}
-              </button>
+
+            <!-- Questions générales -->
+            <div class="mt-7 w-full max-w-lg">
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-600 mb-2">Questions générales</p>
+              <div class="flex flex-wrap gap-2 justify-center">
+                <button *ngFor="let q of quickQuestions" (click)="sendQuickQuestion(q)" type="button"
+                  class="px-3.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 dark:border-slate-700">
+                  {{q}}
+                </button>
+              </div>
+            </div>
+
+            <!-- Mon dossier (personal data) -->
+            <div class="mt-5 w-full max-w-lg">
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-indigo-400 dark:text-indigo-500 mb-2">Mon dossier</p>
+              <div class="flex flex-wrap gap-2 justify-center">
+                <button *ngFor="let q of personalQuestions" (click)="sendQuickQuestion(q)" type="button"
+                  class="px-3.5 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/20">
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+                  {{q}}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -328,17 +356,23 @@ interface ChatThread {
 
         <!-- Input -->
         <div *ngIf="!isSessionResolved()" class="px-4 py-4 border-t flex-shrink-0 transition-colors bg-white border-slate-200 dark:bg-[#0F172A]/60 dark:border-slate-800">
-          <form (ngSubmit)="sendMessage()" class="flex items-end gap-3 max-w-3xl mx-auto">
-            <div class="flex-1 relative">
-              <textarea [(ngModel)]="newMessage" name="msg" rows="1"
-                placeholder="Écrivez votre message..."
-                class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500"
-                (keydown.enter)="$any($event).shiftKey ? null : onEnter($event)"></textarea>
+          <form (ngSubmit)="sendMessage()" class="max-w-3xl mx-auto">
+            <div class="flex items-end gap-3">
+              <div class="flex-1 relative">
+                <textarea #msgInput [(ngModel)]="newMessage" name="msg" rows="1"
+                  placeholder="Écrivez votre message..."
+                  class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500 max-h-40 overflow-y-auto"
+                  (input)="autoGrow($event)"
+                  (keydown.enter)="$any($event).shiftKey ? null : onEnter($event)"></textarea>
+              </div>
+              <button type="submit" [disabled]="!newMessage.trim()" aria-label="Envoyer le message"
+                class="w-11 h-11 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+              </button>
             </div>
-            <button type="submit" [disabled]="!newMessage.trim()"
-              class="w-11 h-11 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed flex-shrink-0">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
-            </button>
+            <p class="text-[10px] text-slate-400 dark:text-slate-600 mt-1.5 ml-1">
+              <kbd class="font-sans">Entrée</kbd> pour envoyer · <kbd class="font-sans">Maj+Entrée</kbd> pour un saut de ligne
+            </p>
           </form>
         </div>
       </main>
@@ -347,6 +381,7 @@ interface ChatThread {
 })
 export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   @ViewChild('messageContainer') private messageContainer!: ElementRef;
+  @ViewChild('msgInput') private msgInput?: ElementRef<HTMLTextAreaElement>;
 
   // Responsive UI Signals
   isSidebarOpen = signal(false);
@@ -362,6 +397,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   thinkingStatus = signal('');
   isHandoffActive = signal(false);
   isHandoffPending = signal(false);
+  handoffPosition = signal<number | null>(null);
+  handoffWaitMin = signal<number | null>(null);
   agentName = signal('');
   isSessionResolved = signal(false);
 
@@ -379,11 +416,21 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   private pendingMessages: string[] = [];  // Messages waiting for the WS to (re)connect
   private authExpired = false;             // Set when the server closes with 4001/4003
 
+  // Generic FAQ — answered from the knowledge base.
   quickQuestions = [
     'Plafond soins dentaires ?',
     'Délai de remboursement ?',
     'Prime de naissance ?',
     'Numéro urgences ?',
+  ];
+
+  // Personal-record prompts — surface the highest-value feature (consulting
+  // your own data) that a new user otherwise never discovers. Wording matches
+  // the personal_lookup router exemplars (réclamation STATUS, not filing).
+  personalQuestions = [
+    'Mes remboursements',
+    'Mes bénéficiaires',
+    'Où en est ma réclamation ?',
   ];
 
   constructor(
@@ -395,6 +442,22 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   ) { }
 
   toggleTheme = () => this.themeService.toggleTheme();
+
+  /** 3-state connection status for the header. Without it, the idle welcome
+   *  screen (no session, no socket) shows a perpetual "Connexion…" that reads
+   *  as broken. */
+  connectionState = (): 'idle' | 'online' | 'connecting' => {
+    if (!this.sessionId) return 'idle';
+    return this.isConnected() ? 'online' : 'connecting';
+  };
+
+  connectionLabel = (): string => {
+    switch (this.connectionState()) {
+      case 'online': return 'En ligne';
+      case 'connecting': return 'Connexion...';
+      default: return 'Prêt';
+    }
+  };
 
   formatMessage(text: string): string {
     if (!text) return '';
@@ -505,6 +568,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.messages.set([]);
     this.isHandoffActive.set(false);
     this.isHandoffPending.set(false);
+    this.handoffPosition.set(null);
+    this.handoffWaitMin.set(null);
     this.agentName.set('');
     this.isSessionResolved.set(false);
     this.streamingContent = '';
@@ -516,7 +581,6 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   switchChat(chat: ChatThread): void {
-    console.log(`[UserChat] switchChat called: chat.id=${chat.id}, current sessionId=${this.sessionId}`);
     if (chat.id === this.sessionId) return;
 
     // Disconnect current
@@ -624,7 +688,6 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   /** Send everything queued while we were disconnected (after backend confirms the bind). */
   private flushPendingMessages(): void {
     if (!this.pendingMessages.length) return;
-    console.log(`[UserChat WS] Flushing ${this.pendingMessages.length} queued message(s)`);
     for (const content of this.pendingMessages) {
       this.socket$?.next({ type: 'user_message', content });
     }
@@ -654,12 +717,10 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   private handleWsMessage(msg: any): void {
     switch (msg.type) {
       case 'connected':
-        console.log('[UserChat WS] ← connected event received');
         this.isConnected.set(true);
         this.flushPendingMessages();
         break;
       case 'history':
-        console.log(`[UserChat WS] ← history: ${msg.messages?.length ?? 0} messages`);
         if (msg.messages?.length) {
           this.messages.set(msg.messages.map((m: any) => ({
             role: m.role,
@@ -678,7 +739,6 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.isThinking.set(false);
         this.thinkingStatus.set('');
         this.streamingContent += msg.token;
-        console.log(`[UserChat WS] ← ai_token (total chars: ${this.streamingContent.length})`);
         // Update or create streaming message
         this.messages.update(msgs => {
           const lastIdx = msgs.length - 1;
@@ -695,7 +755,6 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         });
         break;
       case 'ai_done':
-        console.log(`[UserChat WS] ← ai_done (streamingContent len: ${this.streamingContent.length}, lastMsg streaming: ${this.messages()[this.messages().length-1]?.isStreaming})`);
         this.isThinking.set(false);
         this.thinkingStatus.set('');
         const updated = this.messages();
@@ -730,6 +789,10 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.isHandoffActive.set(true);
         this.isHandoffPending.set(true);
         this.isThinking.set(false);
+        this.handoffPosition.set(msg.queue_position ?? null);
+        this.handoffWaitMin.set(msg.estimated_wait_min ?? null);
+        // Surface a clear notification (the banner alone is easy to miss).
+        this.toastService.show('Votre demande a été transmise à un conseiller', 'info');
         // DON'T disable input — user can keep chatting!
         this.messages.update(m => [...m, {
           role: 'system',
@@ -742,6 +805,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       case 'agent_joined':
         this.agentName.set(msg.agent_name || 'Agent');
         this.isHandoffPending.set(false);
+        this.handoffPosition.set(null);
+        this.handoffWaitMin.set(null);
         this.toastService.show(`${msg.agent_name || 'Un agent'} a rejoint la conversation`, 'info');
         this.messages.update(m => [...m, {
           role: 'system',
@@ -768,6 +833,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     if (!this.newMessage.trim()) return;
     const content = this.newMessage.trim();
     this.newMessage = '';
+    this.resetInputHeight();
 
     // Lazy session creation: if no session exists yet, create one first
     if (!this.sessionId) {
@@ -818,6 +884,19 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   onEnter(event: Event): void {
     event.preventDefault();
     this.sendMessage();
+  }
+
+  /** Grow the input with its content, capped (max-h-40 in the template). */
+  autoGrow(event: Event): void {
+    const el = event.target as HTMLTextAreaElement;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }
+
+  /** Collapse the textarea back to one row after a message is sent. */
+  private resetInputHeight(): void {
+    const el = this.msgInput?.nativeElement;
+    if (el) el.style.height = 'auto';
   }
 
   submitFeedback(rating: string): void {

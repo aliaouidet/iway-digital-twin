@@ -15,7 +15,7 @@ import { IwayLogoComponent } from '../../../shared/components/iway-logo.componen
     <div class="min-h-screen flex items-center justify-center p-4 transition-colors duration-300 bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-[#020617] dark:to-[#020617] dark:bg-[#020617]">
 
       <!-- Theme Toggle -->
-      <button (click)="toggleTheme()" class="absolute top-6 right-6 z-50 w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer bg-white shadow hover:bg-slate-50 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 dark:shadow-none">
+      <button (click)="toggleTheme()" type="button" aria-label="Changer de thème" class="absolute top-6 right-6 z-50 w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer bg-white shadow hover:bg-slate-50 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 dark:shadow-none">
         <!-- Sun icon for dark mode (to switch to light) -->
         <svg class="w-5 h-5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
         <!-- Moon icon for light mode (to switch to dark) -->
@@ -32,7 +32,7 @@ import { IwayLogoComponent } from '../../../shared/components/iway-logo.componen
 
         <!-- Login Card -->
         <div class="rounded-2xl border p-8 space-y-6 transition-colors bg-white border-slate-200 shadow-xl shadow-slate-200/50 dark:bg-[#0F172A] dark:border-slate-800 dark:shadow-none">
-          <h2 class="text-lg font-bold text-slate-900 dark:text-white" style="font-family: 'Figtree', sans-serif;">Sign in to your account</h2>
+          <h2 class="text-lg font-bold text-slate-900 dark:text-white" style="font-family: 'Figtree', sans-serif;">Connectez-vous à votre compte</h2>
 
           <div *ngIf="error()" class="px-4 py-3 rounded-xl text-sm bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20">
             {{error()}}
@@ -41,23 +41,23 @@ import { IwayLogoComponent } from '../../../shared/components/iway-logo.componen
           <form (ngSubmit)="onLogin()" class="space-y-4">
             <div>
               <label class="text-[10px] font-semibold uppercase tracking-wider block mb-1.5 text-slate-500">Matricule</label>
-              <input [(ngModel)]="matricule" name="matricule" placeholder="Enter your matricule"
+              <input [(ngModel)]="matricule" name="matricule" placeholder="Saisissez votre matricule"
                 class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
             </div>
             <div>
-              <label class="text-[10px] font-semibold uppercase tracking-wider block mb-1.5 text-slate-500">Password</label>
-              <input [(ngModel)]="password" name="password" type="password" placeholder="Enter your password"
+              <label class="text-[10px] font-semibold uppercase tracking-wider block mb-1.5 text-slate-500">Mot de passe</label>
+              <input [(ngModel)]="password" name="password" type="password" placeholder="Saisissez votre mot de passe"
                 class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
             </div>
             <button type="submit" [disabled]="isLoading()"
               class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 text-sm">
-              {{isLoading() ? 'Signing in...' : 'Sign In'}}
+              {{isLoading() ? 'Connexion...' : 'Se connecter'}}
             </button>
           </form>
 
           <div *ngIf="personas.length" class="flex items-center gap-3">
             <div class="flex-1 h-px bg-slate-200 dark:bg-slate-800"></div>
-            <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-600">Quick Access</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-600">Accès rapide</span>
             <div class="flex-1 h-px bg-slate-200 dark:bg-slate-800"></div>
           </div>
 
@@ -121,7 +121,7 @@ export class LoginComponent {
       },
       error: (err) => {
         this.isLoading.set(false);
-        this.error.set(err?.error?.detail || 'Authentication failed');
+        this.error.set(err?.error?.detail || 'Échec de l\'authentification');
       }
     });
   }

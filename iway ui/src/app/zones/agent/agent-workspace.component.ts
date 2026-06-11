@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef, HostListener } from '@angular/core';
 import { trigger, transition, style, animate } from '@angular/animations';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -49,6 +49,34 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
         style({ opacity: 0, transform: 'translateY(-10px)' }),
         animate('300ms ease-out', style({ opacity: 1, transform: 'translateY(0)' }))
       ])
+    ]),
+    // Smooth height+fade for collapsible panels (briefing / dossier / dialogs).
+    trigger('expand', [
+      transition(':enter', [
+        style({ height: '0', opacity: 0, overflow: 'hidden' }),
+        animate('220ms cubic-bezier(0.4,0,0.2,1)', style({ height: '*', opacity: 1 }))
+      ]),
+      transition(':leave', [
+        style({ overflow: 'hidden' }),
+        animate('180ms cubic-bezier(0.4,0,0.2,1)', style({ height: '0', opacity: 0 }))
+      ])
+    ]),
+    // Each chat bubble eases in instead of snapping into place.
+    trigger('messageIn', [
+      transition(':enter', [
+        style({ opacity: 0, transform: 'translateY(8px)' }),
+        animate('260ms cubic-bezier(0.4,0,0.2,1)', style({ opacity: 1, transform: 'translateY(0)' }))
+      ])
+    ]),
+    // Right context drawer slides in from the edge.
+    trigger('drawer', [
+      transition(':enter', [
+        style({ transform: 'translateX(100%)', opacity: 0 }),
+        animate('220ms cubic-bezier(0.4,0,0.2,1)', style({ transform: 'translateX(0)', opacity: 1 }))
+      ]),
+      transition(':leave', [
+        animate('180ms cubic-bezier(0.4,0,0.2,1)', style({ transform: 'translateX(100%)', opacity: 0 }))
+      ])
     ])
   ],
   template: `
@@ -70,16 +98,16 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             </div>
           </div>
           <div class="flex items-center gap-1">
-            <button (click)="toggleSidebar()" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer mr-1 hover:bg-slate-100 text-slate-500 dark:hover:bg-slate-800 dark:text-slate-400">
+            <button (click)="toggleSidebar()" type="button" aria-label="Fermer la file d'attente" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer mr-1 hover:bg-slate-100 text-slate-500 dark:hover:bg-slate-800 dark:text-slate-400">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
-            <button (click)="toggleTheme()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
+            <button (click)="toggleTheme()" type="button" aria-label="Changer de thème" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
               <!-- Sun icon for dark mode (to switch to light) -->
               <svg class="w-3.5 h-3.5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
               <!-- Moon icon for light mode (to switch to dark) -->
               <svg class="w-3.5 h-3.5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
             </button>
-            <button (click)="logout()" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
+            <button (click)="logout()" type="button" aria-label="Se déconnecter" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 hover:text-rose-500 dark:hover:bg-slate-800 dark:text-slate-500 dark:hover:text-rose-400">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
             </button>
           </div>
@@ -131,16 +159,17 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             </div>
           </div>
 
-          <button *ngFor="let item of filteredQueue()" (click)="selectSession(item)" @listAnimation
-            class="w-full text-left p-3 rounded-xl border transition-all cursor-pointer"
+          <button *ngFor="let item of filteredQueue()" (click)="selectSession(item)" @listAnimation type="button"
+            class="w-full text-left p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:-translate-y-px active:scale-[0.99]"
             [class]="getQueueItemClass(item)">
             <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-1.5 min-w-0">
                 <span class="w-2 h-2 rounded-full flex-shrink-0"
                   [class]="item.status === 'handoff_pending' ? 'bg-rose-500 animate-pulse' : item.status === 'agent_connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                <span class="text-xs font-semibold text-slate-900 dark:text-white">{{item.user_name}}</span>
+                <span class="text-xs font-semibold truncate text-slate-900 dark:text-white">{{item.user_name}}</span>
+                <span *ngIf="isUnseen(item.id)" class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 flex-shrink-0">Nouveau</span>
               </div>
-              <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+              <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase flex-shrink-0"
                 [class]="getStatusBadge(item.status)">{{getStatusLabel(item.status)}}</span>
             </div>
             <p class="text-[10px] truncate mb-1 text-slate-500 dark:text-slate-500">
@@ -153,7 +182,12 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   [class]="getConfidenceClass(item.last_ai_confidence)">
                   {{item.last_ai_confidence}}%
                 </span>
-                <span class="text-[9px] text-slate-400 dark:text-slate-600">{{formatTime(item.created_at)}}</span>
+                <span class="text-[9px] flex items-center gap-0.5"
+                  [class]="isOverdue(item) ? 'text-rose-500 dark:text-rose-400 font-semibold' : 'text-slate-400 dark:text-slate-600'"
+                  [title]="formatTime(item.created_at)">
+                  <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  {{waitLabel(item.created_at)}}
+                </span>
               </div>
             </div>
           </button>
@@ -199,20 +233,27 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button (click)="toggleBriefing()" class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                [class]="showBriefing()
+              <button (click)="toggleContext('dossier')" type="button" class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                [class]="contextTab() === 'dossier'
+                  ? 'bg-cyan-50 text-cyan-700 border border-cyan-200 dark:bg-cyan-500/15 dark:text-cyan-300 dark:border-cyan-500/30'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'">
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+                Dossier client
+              </button>
+              <button (click)="toggleContext('briefing')" type="button" class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                [class]="contextTab() === 'briefing'
                   ? 'bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
                 Briefing
               </button>
-              <button *ngIf="!hasTakenOver()" (click)="takeoverSession()" [disabled]="isTakingOver()"
-                class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-white disabled:opacity-50">
+              <button *ngIf="!hasTakenOver()" (click)="takeoverSession()" [disabled]="isTakingOver()" type="button"
+                class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all active:scale-95 cursor-pointer flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-white disabled:opacity-50">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59"/></svg>
                 {{isTakingOver() ? 'Prise en charge...' : 'Prendre en charge'}}
               </button>
-              <button *ngIf="hasTakenOver()" (click)="showResolveDialog.set(true)"
-                class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+              <button *ngIf="hasTakenOver()" (click)="showResolveDialog.set(true)" type="button"
+                class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all active:scale-95 cursor-pointer flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 Résolu
               </button>
@@ -220,7 +261,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
           </header>
 
           <!-- Resolve Dialog (inline panel) -->
-          <div *ngIf="showResolveDialog()" class="border-b overflow-hidden transition-all bg-emerald-50 border-emerald-200 dark:bg-emerald-500/5 dark:border-emerald-500/20">
+          <div *ngIf="showResolveDialog()" @expand class="border-b overflow-hidden bg-emerald-50 border-emerald-200 dark:bg-emerald-500/5 dark:border-emerald-500/20">
             <div class="px-5 py-4">
               <div class="flex items-center gap-2 mb-3">
                 <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -249,7 +290,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
           </div>
 
           <!-- Knowledge Extraction Modal -->
-          <div *ngIf="showKnowledgeModal()" class="border-b overflow-hidden transition-all bg-indigo-50 border-indigo-200 dark:bg-indigo-500/5 dark:border-indigo-500/20">
+          <div *ngIf="showKnowledgeModal()" @expand class="border-b overflow-hidden bg-indigo-50 border-indigo-200 dark:bg-indigo-500/5 dark:border-indigo-500/20">
             <div class="px-5 py-4">
               <div class="flex items-center gap-2 mb-3">
                 <svg class="w-4 h-4 text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
@@ -328,9 +369,37 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             </div>
           </div>
 
-          <!-- Briefing Panel (collapsible) -->
-          <div *ngIf="showBriefing() && briefing()" class="border-b overflow-hidden transition-all bg-slate-50 border-slate-200 dark:bg-[#0F172A]/40 dark:border-slate-800">
-            <div class="px-5 py-4">
+          <!-- Workspace: chat (full height, order-1) + right context drawer (order-2) -->
+          <div class="flex-1 flex min-h-0 relative">
+
+            <!-- Right context drawer -->
+            <aside *ngIf="contextOpen()" @drawer
+              class="order-2 absolute xl:relative right-0 top-0 h-full w-full sm:w-[360px] z-30 flex flex-col border-l shadow-2xl xl:shadow-none bg-white border-slate-200 dark:bg-[#0F172A] dark:border-slate-800">
+
+              <!-- Tabs -->
+              <div class="h-11 flex items-center gap-1 px-2 border-b flex-shrink-0 border-slate-200 dark:border-slate-800">
+                <button (click)="openContext('briefing')" type="button"
+                  class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                  [class]="contextTab() === 'briefing' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400' : 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'">Briefing</button>
+                <button (click)="openContext('dossier')" type="button"
+                  class="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                  [class]="contextTab() === 'dossier' ? 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300' : 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'">Dossier client</button>
+                <button (click)="closeContext()" type="button" aria-label="Fermer le panneau"
+                  class="ml-auto w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+
+              <!-- Drawer body -->
+              <div class="flex-1 overflow-y-auto custom-scrollbar">
+
+                <!-- Briefing tab -->
+                <div *ngIf="contextTab() === 'briefing'">
+                  <div *ngIf="briefingLoading() || !briefing()" class="flex items-center gap-2 px-4 py-4">
+                    <div class="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-xs text-indigo-600 dark:text-indigo-400">Génération du résumé...</span>
+                  </div>
+                  <div *ngIf="briefing()" class="px-4 py-4">
               <!-- Client Info + Stats Row -->
               <div class="flex items-start gap-4 mb-3">
                 <div class="flex-1">
@@ -448,16 +517,111 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+                  </div>
+                </div>
 
-          <!-- Chat History -->
-          <div #chatContainer class="flex-1 overflow-y-auto px-5 py-4 space-y-3 custom-scrollbar">
-            <div *ngFor="let msg of chatHistory()" [ngSwitch]="msg.role">
+                <!-- Dossier tab -->
+                <div *ngIf="contextTab() === 'dossier'">
+                  <div *ngIf="clientContext()?.mode === 'mock'" class="px-4 pt-3 -mb-1">
+                    <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400">Démo</span>
+                  </div>
+
+                  <!-- Loading -->
+                  <div *ngIf="clientLoading()" class="flex items-center gap-2 px-4 py-4">
+                    <div class="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-xs text-cyan-600 dark:text-cyan-400">Chargement du dossier client...</span>
+                  </div>
+
+                  <div *ngIf="!clientLoading() && clientContext()" class="px-4 py-4 space-y-3">
+                    <!-- Per-section outage notice (real mode honest degradation) -->
+                    <div *ngIf="clientContextErrors().length > 0" class="px-3 py-2 rounded-lg text-[10px] bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20">
+                      Sections temporairement indisponibles : {{clientContextErrors().join(', ')}}
+                    </div>
+
+                    <div class="space-y-3">
+                  <!-- Contrat -->
+                  <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
+                    <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">Contrat</div>
+                    <div *ngIf="clientContext()?.contrat as c; else noContrat" class="space-y-1 text-[11px] text-slate-700 dark:text-slate-300">
+                      <div class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Police</span><span class="font-medium">{{c.num_police || '—'}}</span></div>
+                      <div *ngIf="c.produit" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Produit</span><span class="font-medium">{{c.produit}}</span></div>
+                      <div *ngIf="c.statut" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Statut</span><span class="font-medium">{{c.statut}}</span></div>
+                      <div *ngIf="c.plafond_annuel != null" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Plafond annuel</span><span class="font-medium">{{c.plafond_annuel}} TND</span></div>
+                      <div *ngIf="c.consomme_annuel != null" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Consommé</span><span class="font-medium">{{c.consomme_annuel}} TND</span></div>
+                    </div>
+                    <ng-template #noContrat><p class="text-[10px] text-slate-400 dark:text-slate-500">Non disponible</p></ng-template>
+                  </div>
+
+                  <!-- Bénéficiaires -->
+                  <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
+                    <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">
+                      Bénéficiaires
+                      <span *ngIf="clientContext()?.beneficiaires?.nombre_beneficiaires != null">({{clientContext()?.beneficiaires?.nombre_beneficiaires}})</span>
+                    </div>
+                    <div *ngIf="clientContext()?.beneficiaires?.beneficiaires?.length; else noBenef" class="space-y-1">
+                      <div *ngFor="let b of clientContext()?.beneficiaires?.beneficiaires" class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-700 dark:text-slate-300">{{b.nom}}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[8px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{b.lien}}</span>
+                      </div>
+                    </div>
+                    <ng-template #noBenef><p class="text-[10px] text-slate-400 dark:text-slate-500">Non disponible</p></ng-template>
+                  </div>
+                </div>
+
+                <!-- Remboursements -->
+                <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
+                  <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">Remboursements récents</div>
+                  <div *ngIf="clientContext()?.remboursements?.dossiers?.length; else noRemb" class="space-y-1.5">
+                    <div *ngFor="let d of clientContext()?.remboursements?.dossiers" class="flex items-center justify-between text-[11px] border-b border-slate-100 dark:border-slate-700/50 pb-1 last:border-0 last:pb-0">
+                      <div class="min-w-0">
+                        <span class="font-medium text-slate-700 dark:text-slate-300">{{d.id || d.num_dossier}}</span>
+                        <span class="text-slate-400 dark:text-slate-500 ml-1.5">{{d.type}}</span>
+                      </div>
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        <span *ngIf="d.montant != null" class="text-slate-500 dark:text-slate-400">{{d.montant}} TND</span>
+                        <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                          [class]="d.status === 'rembourse' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">{{d.status}}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <ng-template #noRemb><p class="text-[10px] text-slate-400 dark:text-slate-500">Non disponible</p></ng-template>
+                </div>
+
+                <!-- Réclamations -->
+                <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
+                  <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">
+                    Réclamations
+                    <span *ngIf="clientContext()?.reclamations?.nombre_reclamations != null">({{clientContext()?.reclamations?.nombre_reclamations}})</span>
+                  </div>
+                  <div *ngIf="clientContext()?.reclamations?.reclamations?.length; else noRecl" class="space-y-1.5">
+                    <div *ngFor="let r of clientContext()?.reclamations?.reclamations" class="flex items-center justify-between text-[11px] border-b border-slate-100 dark:border-slate-700/50 pb-1 last:border-0 last:pb-0">
+                      <div class="min-w-0">
+                        <span class="font-medium text-slate-700 dark:text-slate-300">{{r.numero}}</span>
+                        <span class="text-slate-400 dark:text-slate-500 ml-1.5 truncate">{{r.objet}}</span>
+                      </div>
+                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase flex-shrink-0"
+                        [class]="r.statut === 'Clôturé' ? 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">{{r.statut}}</span>
+                    </div>
+                  </div>
+                  <ng-template #noRecl><p class="text-[10px] text-slate-400 dark:text-slate-500">Non disponible</p></ng-template>
+                </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <!-- Backdrop (overlay mode, below xl) -->
+            <div *ngIf="contextOpen()" (click)="closeContext()" class="absolute inset-0 bg-black/40 z-20 xl:hidden"></div>
+
+            <!-- Chat column (order-1 = left, fills remaining width) -->
+            <div class="order-1 flex-1 flex flex-col min-w-0 min-h-0">
+
+              <!-- Chat History -->
+              <div #chatContainer class="flex-1 overflow-y-auto px-5 py-4 space-y-3 custom-scrollbar">
+            <div *ngFor="let msg of chatHistory()" [ngSwitch]="msg.role" @messageIn>
               <!-- System -->
               <div *ngSwitchCase="'system'" class="flex justify-center">
-                <span class="px-3 py-1.5 rounded-full text-[10px] font-medium"
-                  class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500">{{msg.content}}</span>
+                <span class="px-3 py-1.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400">{{msg.content}}</span>
               </div>
               <!-- User -->
               <div *ngSwitchCase="'user'" class="flex justify-start gap-2">
@@ -506,14 +670,44 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
           <!-- Agent Input (after takeover) -->
           <div *ngIf="hasTakenOver()" class="px-5 py-3 border-t flex-shrink-0 bg-white border-slate-200 dark:bg-[#0F172A]/60 dark:border-slate-800">
-            <form (ngSubmit)="sendAgentMessage()" class="flex items-center gap-3">
-              <input [(ngModel)]="agentMessage" name="agentMsg" placeholder="Répondre au client..."
-                class="flex-1 px-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-amber-500/50 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500" />
-              <button type="submit" [disabled]="!agentMessage.trim()"
-                class="w-10 h-10 bg-amber-500 hover:bg-amber-400 disabled:opacity-30 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed">
+
+            <!-- Co-pilot + quick replies -->
+            <div class="flex items-center gap-1.5 mb-2 flex-wrap">
+              <button (click)="suggestReply()" type="button" [disabled]="isSuggesting()"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-semibold cursor-pointer transition-all active:scale-95 flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/40">
+                <div *ngIf="isSuggesting()" class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <svg *ngIf="!isSuggesting()" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                {{isSuggesting() ? 'Rédaction...' : 'Suggérer (IA)'}}
+              </button>
+              <button *ngFor="let qr of quickReplies" (click)="insertQuickReply(qr.text)" type="button"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-medium cursor-pointer transition-colors bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700">
+                {{qr.label}}
+              </button>
+            </div>
+
+            <!-- Grounded badge after a suggestion -->
+            <div *ngIf="lastSuggestionGrounded() !== null" class="mb-1.5">
+              <span class="text-[9px] font-medium px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+                [class]="lastSuggestionGrounded()
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                  : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'">
+                {{lastSuggestionGrounded() ? '✦ Proposition IA — sourcée, à relire' : '✦ Proposition IA — non sourcée, vérifiez'}}
+              </span>
+            </div>
+
+            <form (ngSubmit)="sendAgentMessage()" class="flex items-end gap-3">
+              <textarea #agentInput [(ngModel)]="agentMessage" name="agentMsg" rows="1"
+                (keydown)="onAgentKeydown($event)" (input)="autoGrowAgent($event)"
+                placeholder="Répondre au client..."
+                class="flex-1 px-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-amber-500/50 resize-none max-h-40 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500"></textarea>
+              <button type="submit" [disabled]="!agentMessage.trim()" aria-label="Envoyer"
+                class="w-10 h-10 flex-shrink-0 bg-amber-500 hover:bg-amber-400 disabled:opacity-30 rounded-xl flex items-center justify-center text-white transition-all cursor-pointer disabled:cursor-not-allowed">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
               </button>
             </form>
+            <p class="text-[9px] mt-1.5 text-slate-400 dark:text-slate-600">Entrée pour envoyer · Maj+Entrée pour un saut de ligne · une proposition IA doit toujours être relue</p>
+          </div>
+            </div>
           </div>
         </ng-container>
       </main>
@@ -522,6 +716,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 })
 export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   @ViewChild('chatContainer') private chatContainer!: ElementRef;
+  @ViewChild('agentInput') private agentInput!: ElementRef<HTMLTextAreaElement>;
 
   queue = this.wsService.sidebarQueue;
   queueLoading = signal(true);
@@ -546,8 +741,11 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     { key: 'mine', label: 'Mes cas' },
   ];
 
+  // ─── Right context drawer (Briefing / Dossier tabs) ───
+  // Single source of truth for which context panel is open (null = closed).
+  contextTab = signal<'briefing' | 'dossier' | null>(null);
+
   // Briefing
-  showBriefing = signal(false);
   briefing = signal<Briefing | null>(null);
   briefingLoading = signal(false);
   showClarifyInput = signal(false);
@@ -563,6 +761,29 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   extractionLoading = signal(false);
   extractedPairs = signal<any[]>([]);
   savingKnowledge = signal(false);
+
+  // ─── AI Co-pilot (suggested reply) ───
+  isSuggesting = signal(false);
+  lastSuggestionGrounded = signal<boolean | null>(null);
+
+  // ─── Client dossier panel ───
+  clientContext = signal<any | null>(null);
+  clientLoading = signal(false);
+
+  // ─── Quick-reply macros (agent canned answers) ───
+  quickReplies: { label: string; text: string }[] = [
+    { label: 'Délais', text: "Le délai de traitement d'un remboursement est généralement de 5 à 10 jours ouvrables après réception du dossier complet." },
+    { label: 'Pièces à fournir', text: "Pour traiter votre demande, merci de nous transmettre la facture acquittée, la feuille de soins et, le cas échéant, la prescription médicale." },
+    { label: 'Vérification', text: "Je vérifie votre dossier auprès de nos services et je reviens vers vous dans les plus brefs délais." },
+    { label: 'Remerciement', text: "Je vous remercie pour votre patience. N'hésitez pas si vous avez d'autres questions." },
+  ];
+
+  // ─── Live wait-time clock (re-renders queue timers every 30s) ───
+  protected clock = signal(Date.now());
+  private clockTimer: any = null;
+
+  // ─── Unseen escalations (arrived while viewing another case) ───
+  unseenIds = signal<Set<string>>(new Set());
 
   private eventSub?: Subscription;
   private sessionSocket$: WebSocketSubject<any> | null = null;
@@ -602,9 +823,18 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.loadQueue();
     const token = this.authService.getToken();
     this.wsService.connect(token || undefined);
+
+    // Tick the wait-time clock so queue timers stay fresh without a reload.
+    this.clockTimer = setInterval(() => this.clock.set(Date.now()), 30000);
+
     this.eventSub = this.wsService.getMessages().subscribe(msg => {
       if (msg.type === 'NEW_ESCALATION') {
         this.toastService.show('Nouvelle escalation reçue', 'warning');
+        // Flag it as unseen unless the agent is already looking at it.
+        const sid = msg.payload?.session_id || msg.payload?.id;
+        if (sid && this.activeSession()?.id !== sid) {
+          this.unseenIds.update(s => new Set(s).add(sid));
+        }
       } else if (msg.type === 'SESSION_RESOLVED') {
         this.toastService.show('Session résolue avec succès', 'success');
       } else if (msg.type === 'AGENT_JOINED') {
@@ -671,15 +901,19 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   selectSession(item: QueueItem): void {
     this.activeSession.set(item);
+    this.markSeen(item.id);
     // "Taken over" (chat input shown) only applies to THIS agent's sessions —
     // another agent's active session is view-only here.
     const isMine = item.status === 'agent_connected'
       && item.agent_matricule === this.currentAgentMatricule;
     this.hasTakenOver.set(isMine);
-    this.showBriefing.set(false);
+    // Context drawer + its data are per-session — close & clear, lazy-load on demand.
+    this.contextTab.set(null);
     this.briefing.set(null);
+    this.clientContext.set(null);
     this.showClarifyInput.set(false);
     this.clarifyText = '';
+    this.lastSuggestionGrounded.set(null);
     this.loadHistory(item.id);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
@@ -691,9 +925,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     }
     this.closeSidebarOnMobile();
 
-    // Auto-load briefing for pending sessions
+    // Auto-open the briefing tab for pending sessions
     if (item.status === 'handoff_pending') {
-      this.toggleBriefing();
+      this.openContext('briefing');
     }
   }
 
@@ -706,18 +940,37 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     });
   }
 
-  toggleBriefing(): void {
-    if (this.showBriefing()) {
-      this.showBriefing.set(false);
+  // ─── Context drawer (Briefing / Dossier tabs) ───
+
+  contextOpen(): boolean {
+    return this.contextTab() !== null;
+  }
+
+  /** Switch the drawer to a tab (opening it), lazy-loading that tab's data once. */
+  openContext(tab: 'briefing' | 'dossier'): void {
+    if (!this.activeSession()) return;
+    this.contextTab.set(tab);
+    if (tab === 'briefing' && !this.briefing()) this.loadBriefing();
+    if (tab === 'dossier' && !this.clientContext()) this.loadClientContext();
+  }
+
+  /** Header buttons: open the tab, or close the drawer if it's already showing. */
+  toggleContext(tab: 'briefing' | 'dossier'): void {
+    if (this.contextTab() === tab) {
+      this.contextTab.set(null);
       return;
     }
+    this.openContext(tab);
+  }
 
+  closeContext(): void {
+    this.contextTab.set(null);
+  }
+
+  private loadBriefing(): void {
     const session = this.activeSession();
     if (!session) return;
-
-    this.showBriefing.set(true);
     this.briefingLoading.set(true);
-
     this.http.get<Briefing>(`${environment.apiUrl}/api/v1/sessions/${session.id}/briefing`).subscribe({
       next: (data) => {
         this.briefing.set(data);
@@ -808,7 +1061,6 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
         count: 5,
         delay: (error, retryCount) => {
           const delayMs = Math.min(2000 * Math.pow(2, retryCount - 1), 30000);
-          console.log(`[Agent WS] Reconnecting in ${delayMs}ms (attempt ${retryCount})...`);
           return timer(delayMs);
         },
         resetOnSuccess: true,
@@ -837,10 +1089,157 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       return;
     }
     const content = this.agentMessage.trim();
+    // Send first: only echo into the history once it's actually on the wire,
+    // so a failed send doesn't leave a phantom "sent" message in the thread.
+    try {
+      this.sessionSocket$.next({ type: 'agent_message', content });
+    } catch {
+      this.toastService.show("Échec de l'envoi — re-sélectionnez la session.", 'error');
+      return;
+    }
     this.agentMessage = '';
+    this.lastSuggestionGrounded.set(null);
+    this.resetAgentInputHeight();
     this.chatHistory.update(h => [...h, { role: 'agent', content }]);
-    this.sessionSocket$.next({ type: 'agent_message', content });
     setTimeout(() => this.scrollChat(), 50);
+  }
+
+  // ─── AI Co-pilot ───
+
+  /** Draft a RAG-grounded reply and drop it into the (editable) input. */
+  suggestReply(): void {
+    const session = this.activeSession();
+    if (!session) return;
+    this.isSuggesting.set(true);
+    this.lastSuggestionGrounded.set(null);
+
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/suggest`, {}).subscribe({
+      next: (res) => {
+        this.isSuggesting.set(false);
+        const text = (res?.suggestion || '').trim();
+        if (!text) {
+          this.toastService.show('Aucune suggestion générée', 'warning');
+          return;
+        }
+        this.agentMessage = text;
+        this.lastSuggestionGrounded.set(!!res.grounded);
+        setTimeout(() => { this.resizeAgentInput(); this.agentInput?.nativeElement.focus(); }, 0);
+      },
+      error: (err) => {
+        this.isSuggesting.set(false);
+        this.toastService.show(
+          err?.status === 503 ? 'Suggestion indisponible — réessayez' : 'Échec de la suggestion',
+          'error',
+        );
+      },
+    });
+  }
+
+  // ─── Quick replies ───
+
+  insertQuickReply(text: string): void {
+    this.agentMessage = this.agentMessage.trim() ? `${this.agentMessage.trim()} ${text}` : text;
+    this.lastSuggestionGrounded.set(null);
+    setTimeout(() => { this.resizeAgentInput(); this.agentInput?.nativeElement.focus(); }, 0);
+  }
+
+  // ─── Client dossier panel ───
+
+  private loadClientContext(): void {
+    const session = this.activeSession();
+    if (!session) return;
+    this.clientLoading.set(true);
+    this.http.get<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/client-context`).subscribe({
+      next: (data) => { this.clientContext.set(data); this.clientLoading.set(false); },
+      error: () => {
+        this.clientLoading.set(false);
+        this.toastService.show('Dossier client indisponible', 'error');
+      },
+    });
+  }
+
+  clientContextErrors(): string[] {
+    return this.clientContext()?.errors || [];
+  }
+
+  // ─── Textarea (multiline input) ───
+
+  onAgentKeydown(event: KeyboardEvent): void {
+    // Enter sends, Shift+Enter inserts a newline (matches the user chat).
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      this.sendAgentMessage();
+    }
+  }
+
+  autoGrowAgent(event: Event): void {
+    const el = event.target as HTMLTextAreaElement;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  private resizeAgentInput(): void {
+    const el = this.agentInput?.nativeElement;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  private resetAgentInputHeight(): void {
+    const el = this.agentInput?.nativeElement;
+    if (el) el.style.height = 'auto';
+  }
+
+  // ─── Keyboard navigation (power-agent shortcuts) ───
+
+  @HostListener('document:keydown', ['$event'])
+  onGlobalKeydown(event: KeyboardEvent): void {
+    // Don't hijack typing or shortcuts in fields.
+    const target = event.target as HTMLElement;
+    const tag = target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key !== 'j' && event.key !== 'k') return;
+
+    const items = this.filteredQueue();
+    if (items.length === 0) return;
+    event.preventDefault();
+
+    const currentId = this.activeSession()?.id;
+    let idx = items.findIndex(i => i.id === currentId);
+    if (event.key === 'j') idx = idx < 0 ? 0 : Math.min(idx + 1, items.length - 1);
+    else idx = idx < 0 ? 0 : Math.max(idx - 1, 0);
+    this.selectSession(items[idx]);
+  }
+
+  // ─── Wait-time + unseen helpers ───
+
+  waitMinutes(iso: string): number {
+    try {
+      return Math.max(0, Math.floor((this.clock() - new Date(iso).getTime()) / 60000));
+    } catch { return 0; }
+  }
+
+  waitLabel(iso: string): string {
+    const m = this.waitMinutes(iso);
+    if (m < 1) return "à l'instant";
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60), r = m % 60;
+    return r ? `${h}h${r.toString().padStart(2, '0')}` : `${h}h`;
+  }
+
+  isOverdue(item: QueueItem): boolean {
+    return item.status === 'handoff_pending' && this.waitMinutes(item.created_at) >= 5;
+  }
+
+  markSeen(id: string): void {
+    if (this.unseenIds().has(id)) {
+      this.unseenIds.update(s => { const n = new Set(s); n.delete(id); return n; });
+    }
+  }
+
+  isUnseen(id: string): boolean {
+    return this.unseenIds().has(id);
   }
 
   resolveSession(): void {
@@ -948,11 +1347,13 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.activeSession.set(null);
     this.chatHistory.set([]);
     this.hasTakenOver.set(false);
-    this.showBriefing.set(false);
+    this.contextTab.set(null);
     this.briefing.set(null);
     this.saveToKnowledge = false;
     this.resolveTags = '';
     this.extractedPairs.set([]);
+    this.clientContext.set(null);
+    this.lastSuggestionGrounded.set(null);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
   }
@@ -961,9 +1362,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   getQueueItemClass(item: QueueItem): string {
     const active = this.activeSession()?.id === item.id;
-    if (active) return 'bg-indigo-50 border-indigo-300 dark:bg-slate-800/80 dark:border-indigo-500/50';
-    if (item.status === 'handoff_pending') return 'bg-rose-50 border-rose-200 hover:border-rose-300 dark:bg-rose-500/5 dark:border-rose-500/20 dark:hover:border-rose-500/40';
-    return 'bg-white border-slate-200 hover:border-slate-300 shadow-sm dark:bg-slate-800/30 dark:border-slate-700/50 dark:hover:border-slate-600';
+    if (active) return 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-400/40 shadow-md dark:bg-slate-800/80 dark:border-indigo-500/50 dark:ring-indigo-500/30';
+    if (item.status === 'handoff_pending') return 'bg-rose-50 border-rose-200 hover:border-rose-300 hover:shadow-md dark:bg-rose-500/5 dark:border-rose-500/20 dark:hover:border-rose-500/40';
+    return 'bg-white border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md dark:bg-slate-800/30 dark:border-slate-700/50 dark:hover:border-slate-600';
   }
 
   getStatusBadge(status: string): string {
@@ -1010,5 +1411,6 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.eventSub?.unsubscribe();
     this.sessionSocket$?.complete();
     this.wsService.disconnect();
+    if (this.clockTimer) clearInterval(this.clockTimer);
   }
 }

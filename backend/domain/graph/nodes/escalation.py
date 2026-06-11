@@ -20,11 +20,30 @@ from backend.config import get_settings
 logger = logging.getLogger("I-Way-Twin")
 settings = get_settings()
 
-_STUB_RESPONSE = (
-    "Je comprends votre frustration. Un agent humain va prendre "
-    "en charge votre conversation dans les plus brefs delais. "
-    "Votre position dans la file : 1."
+# Empathy opener used only when the user sounds frustrated/angry — otherwise the
+# message stays neutral and professional (no fake "position dans la file : 1",
+# which the node cannot know: the real queue position is computed in
+# chat_service from the live session store and sent in the handoff banner).
+_FRUSTRATION_RE = re.compile(
+    r"(frustr|[ée]nerv|inadmissible|scandaleu|honteu|inacceptable|"
+    r"marre|ras[- ]le[- ]bol|col[èe]re|nul|lamentable|incompétent)",
+    re.IGNORECASE,
 )
+
+
+def _handoff_message(reason: str) -> str:
+    """Craft the user-facing handoff text — warm, honest, no invented data."""
+    base = (
+        "Je transmets votre demande à un conseiller I-Santé qui pourra vous "
+        "accompagner personnellement. Vous pouvez continuer à écrire ici en "
+        "attendant — toute la conversation lui sera transmise."
+    )
+    if _FRUSTRATION_RE.search(reason or ""):
+        return (
+            "Je comprends votre frustration et je veux m'assurer que vous soyez "
+            "bien accompagné(e). " + base
+        )
+    return base
 
 # Filing a réclamation is a PRODUCTION WRITE. It must only happen when the user
 # EXPLICITLY asks to file one — never on anger detection or a plain request for
@@ -54,7 +73,7 @@ async def escalation_node(state: ClaimsGraphState) -> dict:
     logger.info(f"Escalation triggered: {reason[:60]}...")
 
     ticket = None
-    final_response = _STUB_RESPONSE
+    final_response = _handoff_message(reason)
 
     if settings.IWAY_USE_REAL_API and matricule and wants_formal_complaint(reason):
         try:
