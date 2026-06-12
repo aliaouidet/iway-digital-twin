@@ -198,6 +198,7 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
                     <div *ngIf="log.confidence" class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center gap-4">
                       <span class="text-[10px] text-slate-500">Confidence: <span class="font-bold" [class]="log.confidence >= 0.7 ? 'text-emerald-500 dark:text-emerald-400' : log.confidence >= 0.4 ? 'text-amber-500 dark:text-amber-400' : 'text-rose-500 dark:text-rose-400'">{{(log.confidence * 100).toFixed(0)}}%</span></span>
                       <span *ngIf="log.model" class="text-[10px] text-slate-500 dark:text-slate-600">Model: <span class="text-slate-700 dark:text-slate-400">{{log.model}}</span></span>
+                      <span *ngIf="log.tokens_used" class="text-[10px] text-slate-500 dark:text-slate-600">Tokens: <span class="text-fuchsia-600 dark:text-fuchsia-400 font-bold">{{log.tokens_used | number}}</span></span>
                       <span class="text-[10px] text-slate-500 dark:text-slate-600">Trace: <span class="text-slate-700 dark:text-slate-400 font-mono">{{log.id.substring(0,12) || 'n/a'}}</span></span>
                     </div>
                   </div>

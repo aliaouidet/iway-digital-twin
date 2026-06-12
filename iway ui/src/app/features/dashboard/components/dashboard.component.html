@@ -104,6 +104,82 @@
     </div>
   </div>
 
+  <!-- AI Ops: tokens, cache, escalation paths, node latency, circuits, persistence -->
+  <div *ngIf="ops() as o">
+    <div class="flex items-center gap-2 mb-3">
+      <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">AI Ops</h3>
+      <span class="text-[10px] text-slate-400 font-mono">tokens · cache · circuits</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+
+      <!-- LLM Tokens (durable, from audit log) -->
+      <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md">
+        <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-500"></span> LLM Tokens
+        </div>
+        <div class="text-2xl font-extrabold text-slate-800 dark:text-white tracking-tight">{{o.tokens.total_tokens | number}}</div>
+        <div class="text-[10px] text-slate-400 mt-2 font-medium">{{o.tokens.tokens_24h | number}} last 24h · ~{{o.tokens.avg_tokens_per_llm_request | number}}/req</div>
+      </div>
+
+      <!-- Semantic cache hit rate -->
+      <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md">
+        <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> Cache Hit Rate
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight" [class]="o.cache.hit_rate >= 30 ? 'text-emerald-500' : 'text-slate-800 dark:text-white'">{{o.cache.hit_rate}}%</div>
+        <div class="text-[10px] text-slate-400 mt-2 font-medium">{{o.cache.hits}} hits · {{o.cache.misses}} misses</div>
+      </div>
+
+      <!-- Escalation paths -->
+      <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md">
+        <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Escalation Paths
+        </div>
+        <div *ngIf="escalationEntries().length === 0" class="text-[11px] text-slate-400 mt-1">None since restart</div>
+        <div *ngFor="let e of escalationEntries().slice(0, 3)" class="flex items-center justify-between text-[11px] mt-1">
+          <span class="text-slate-600 dark:text-slate-300 truncate">{{e.label}}</span>
+          <span class="font-bold text-slate-800 dark:text-white ml-2">{{e.count}}</span>
+        </div>
+      </div>
+
+      <!-- Slowest graph nodes -->
+      <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md">
+        <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Slowest Nodes
+        </div>
+        <div *ngIf="o.nodes.length === 0" class="text-[11px] text-slate-400 mt-1">No traffic since restart</div>
+        <div *ngFor="let n of o.nodes.slice(0, 3)" class="flex items-center justify-between text-[11px] mt-1">
+          <span class="text-slate-600 dark:text-slate-300 font-mono truncate">{{n.node}}</span>
+          <span class="font-bold ml-2" [class]="n.avg_ms > 5000 ? 'text-rose-500' : n.avg_ms > 2000 ? 'text-amber-500' : 'text-slate-800 dark:text-white'">{{n.avg_ms | number:'1.0-0'}}ms</span>
+        </div>
+      </div>
+
+      <!-- Circuit breakers -->
+      <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md">
+        <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full bg-violet-500"></span> Circuits
+        </div>
+        <div class="flex flex-wrap gap-1.5 mt-1">
+          <span *ngFor="let c of circuitEntries()" class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase" [class]="circuitClass(c.state)">
+            {{c.name}}
+          </span>
+        </div>
+      </div>
+
+      <!-- DB persistence health -->
+      <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border transition-all duration-300 hover:scale-[1.02] hover:shadow-md"
+        [class]="o.persistence.degraded ? 'border-rose-300 dark:border-rose-500/40' : 'border-slate-200 dark:border-white/5'">
+        <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full" [class]="o.persistence.degraded ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'"></span> DB Persistence
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight" [class]="o.persistence.degraded ? 'text-rose-500' : 'text-emerald-500'">
+          {{o.persistence.degraded ? 'DEGRADED' : 'OK'}}
+        </div>
+        <div class="text-[10px] text-slate-400 mt-2 font-medium">{{o.persistence.total_failures}} write failure{{o.persistence.total_failures === 1 ? '' : 's'}}</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Charts Row 1: Performance Timeline + Resolution Breakdown -->
   <div *ngIf="!isLoading() && metrics()" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 lg:col-span-2 relative overflow-hidden">

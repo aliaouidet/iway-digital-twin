@@ -5,7 +5,7 @@ import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { auditTime } from 'rxjs/operators';
-import { MetricsService } from '../../../core/services/metrics.service';
+import { MetricsService, OpsMetrics } from '../../../core/services/metrics.service';
 import { WebSocketService } from '../../../core/services/websocket.service';
 import { DashboardMetrics } from '../../../shared/models';
 
@@ -19,6 +19,7 @@ import { DashboardMetrics } from '../../../shared/models';
 })
 export class DashboardComponent implements OnInit {
   metrics = signal<DashboardMetrics | null>(null);
+  ops = signal<OpsMetrics | null>(null);
   isLoading = signal(true);
 
   // Date picker state
@@ -128,6 +129,38 @@ export class DashboardComponent implements OnInit {
     this.metricsService.getHourlyTraffic(trafficDate || undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (data) => this.buildTrafficChart(data.hourly),
     });
+
+    // AI-Ops snapshot (tokens, cache, escalation paths, node latencies, circuits)
+    this.metricsService.getOpsMetrics().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (data) => this.ops.set(data),
+      error: () => this.ops.set(null),
+    });
+  }
+
+  // --- AI-Ops helpers ---
+
+  escalationEntries(): { label: string; count: number }[] {
+    const labels: { [k: string]: string } = {
+      graph: 'Explicit request',
+      low_confidence: 'Low confidence',
+      degraded: 'Service degraded',
+      manual: 'Manual button',
+    };
+    const esc = this.ops()?.escalations || {};
+    return Object.entries(esc)
+      .map(([path, count]) => ({ label: labels[path] || path, count: count as number }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  circuitEntries(): { name: string; state: string }[] {
+    const circuits = this.ops()?.circuits || {};
+    return Object.values(circuits).map(c => ({ name: c.name, state: c.state }));
+  }
+
+  circuitClass(state: string): string {
+    if (state === 'open') return 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400';
+    if (state === 'half_open') return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400';
   }
 
   // --- Charts ---
