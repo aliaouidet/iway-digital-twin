@@ -35,7 +35,28 @@ from backend.services.ws_manager import ConnectionManager
 
 # --- Configuration & Logging ---
 settings = get_settings()
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
+
+
+class _TraceIdFilter(logging.Filter):
+    """Inject the current OTel trace id into every log record so a Jaeger
+    trace ↔ `docker compose logs` grep is one copy-paste."""
+
+    def filter(self, record):
+        record.otel_trace = "-"
+        try:
+            from opentelemetry import trace as _t
+            from opentelemetry.trace import format_trace_id as _fmt
+            ctx = _t.get_current_span().get_span_context()
+            if ctx and ctx.trace_id:
+                record.otel_trace = _fmt(ctx.trace_id)
+        except Exception:
+            pass
+        return True
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - [trace=%(otel_trace)s] - %(message)s")
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_TraceIdFilter())
 logger = logging.getLogger("I-Way-Twin")
 
 # --- Readiness Gate ---
@@ -187,6 +208,16 @@ try:
     logger.info("🔭 OpenTelemetry (Jaeger) instrumentation enabled.")
 except ImportError:
     logger.warning("⚠️ OpenTelemetry not installed. Tracing disabled.")
+
+# --- Prometheus /metrics ---
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator(
+        excluded_handlers=["/metrics", "/health", "/ready"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    logger.info("📊 Prometheus /metrics enabled")
+except ImportError:
+    logger.warning("⚠️ prometheus-fastapi-instrumentator not installed — /metrics disabled (rebuild the image)")
 
 # CORS: explicit origins come from settings.ALLOWED_ORIGINS (comma-separated env
 # var) — in production that list is the ONLY source. The wide private-LAN regex

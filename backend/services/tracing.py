@@ -28,6 +28,41 @@ logger = logging.getLogger("I-Way-Twin")
 
 
 # ==============================================================
+# OTEL BRIDGE — mirror business spans into OpenTelemetry/Jaeger
+#
+# Before this bridge, Jaeger only saw the auto-instrumented HTTP/Redis/DB
+# calls (and the chat hot path lives inside one long-lived WebSocket, so it
+# saw almost nothing). Each RequestTrace now opens a NEW OTel trace
+# ("chat.message") and every TraceSpan becomes a child span — Jaeger shows
+# the full business waterfall (decompose → rag → draft → compliance)
+# interleaved with the Redis/DB spans captured while it is attached.
+# ==============================================================
+try:
+    from opentelemetry import trace as _otel_api
+    from opentelemetry import context as _otel_ctx
+    from opentelemetry.context import Context as _OtelContext
+    from opentelemetry.trace import set_span_in_context, format_trace_id
+    from opentelemetry.trace import Status as _OtelStatus, StatusCode as _OtelStatusCode
+    _otel_tracer = _otel_api.get_tracer("iway.pipeline")
+    _OTEL = True
+except ImportError:  # pragma: no cover — telemetry is optional
+    _OTEL = False
+
+
+def _safe_attrs(metadata: dict) -> dict:
+    """OTel attributes must be flat primitives — coerce and truncate."""
+    out = {}
+    for k, v in (metadata or {}).items():
+        if v is None:
+            continue
+        if isinstance(v, (bool, int, float)):
+            out[k] = v
+        else:
+            out[k] = str(v)[:200]
+    return out
+
+
+# ==============================================================
 # TRACE SPAN — A single pipeline stage
 # ==============================================================
 
@@ -39,11 +74,22 @@ class TraceSpan:
     ended_at: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     status: str = "running"  # running | completed | failed
+    _otel_span: Any = field(default=None, repr=False, compare=False)
 
     def finish(self, status: str = "completed", **extra_metadata):
         self.ended_at = time.time()
         self.status = status
         self.metadata.update(extra_metadata)
+        if self._otel_span is not None:
+            try:
+                for k, v in _safe_attrs(self.metadata).items():
+                    self._otel_span.set_attribute(k, v)
+                if status == "failed":
+                    self._otel_span.set_status(_OtelStatus(_OtelStatusCode.ERROR))
+                self._otel_span.end()
+            except Exception:
+                pass
+            self._otel_span = None
 
     @property
     def duration_ms(self) -> Optional[float]:
@@ -85,9 +131,46 @@ class RequestTrace:
     total_duration_ms: Optional[float] = None
     tokens_used: int = 0
 
+    # OTel mirror (per-message root span + the context-attach token)
+    _otel_root: Any = field(default=None, repr=False, compare=False)
+    _otel_token: Any = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if not _OTEL:
+            return
+        try:
+            # context=Context() forces a NEW trace per user message — otherwise
+            # every message in a WS connection would pile into one giant trace.
+            self._otel_root = _otel_tracer.start_span(
+                "chat.message",
+                context=_OtelContext(),
+                attributes=_safe_attrs({
+                    "session.id": self.session_id,
+                    "user.matricule": self.user_matricule,
+                    "query.preview": self.query[:80],
+                }),
+            )
+            self.otel_trace_id = format_trace_id(self._otel_root.get_span_context().trace_id)
+            # Attach so auto-instrumented Redis/DB spans during this message's
+            # processing join OUR trace. attach/detach happen in the same WS
+            # task (create → finish), so this is contextvar-safe.
+            self._otel_token = _otel_ctx.attach(set_span_in_context(self._otel_root))
+        except Exception:
+            self._otel_root = None
+            self._otel_token = None
+
     def start_span(self, name: str, **metadata) -> TraceSpan:
         """Start a new pipeline stage."""
         span = TraceSpan(name=name, metadata=metadata)
+        if self._otel_root is not None:
+            try:
+                span._otel_span = _otel_tracer.start_span(
+                    name,
+                    context=set_span_in_context(self._otel_root),
+                    attributes=_safe_attrs(metadata),
+                )
+            except Exception:
+                pass
         self.spans.append(span)
         return span
 
@@ -97,7 +180,31 @@ class RequestTrace:
         self.confidence = confidence
         self.source_type = source_type
         self.total_duration_ms = round((time.time() - self.started_at) * 1000, 1)
-        self.tokens_used = sum(span.metadata.get("tokens", 0) for span in self.spans)
+        # Keep an explicitly-set token count (real LLM usage from graph_executor);
+        # fall back to the legacy per-span sum otherwise.
+        if not self.tokens_used:
+            self.tokens_used = sum(span.metadata.get("tokens", 0) for span in self.spans)
+
+        if self._otel_root is not None:
+            try:
+                self._otel_root.set_attribute("outcome", outcome or "")
+                if confidence is not None:
+                    self._otel_root.set_attribute("confidence", float(confidence))
+                if source_type:
+                    self._otel_root.set_attribute("source.type", source_type)
+                self._otel_root.set_attribute("tokens.used", int(self.tokens_used or 0))
+                if outcome == "ERROR":
+                    self._otel_root.set_status(_OtelStatus(_OtelStatusCode.ERROR))
+                self._otel_root.end()
+            except Exception:
+                pass
+            self._otel_root = None
+        if self._otel_token is not None:
+            try:
+                _otel_ctx.detach(self._otel_token)
+            except Exception:
+                pass
+            self._otel_token = None
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +218,7 @@ class RequestTrace:
             "confidence": self.confidence,
             "source_type": self.source_type,
             "total_duration_ms": self.total_duration_ms,
+            "tokens_used": self.tokens_used,
             "spans": [s.to_dict() for s in self.spans],
             "span_count": len(self.spans),
         }

@@ -59,6 +59,13 @@ class CircuitBreaker:
         self.last_state_change = datetime.now(timezone.utc).isoformat()
         if new_state == CircuitState.OPEN:
             self.total_circuit_opens += 1
+        try:
+            from backend.services.metrics import CIRCUIT_STATE
+            CIRCUIT_STATE.labels(name=self.name).set(
+                {CircuitState.CLOSED: 0, CircuitState.HALF_OPEN: 1, CircuitState.OPEN: 2}[new_state]
+            )
+        except Exception:
+            pass
         logger.warning(f"⚡ Circuit [{self.name}]: {old.value} → {new_state.value} "
                       f"(failures={self.failure_count}/{self.failure_threshold})")
 
