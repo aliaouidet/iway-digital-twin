@@ -247,6 +247,9 @@ async def execute_claims_graph(
                 "tokens_in": tokens_in,
                 "tokens_out": tokens_out,
                 "tokens_used": tokens_in + tokens_out,
+                # Structured records from personal lookups (already PII-normalized
+                # shapes from lookups.py) — the UI renders these as claim cards.
+                "records": state_values.get("system_records") or None,
                 "degraded": False,
                 "retrieved_docs": [
                     {"content": d.content, "source_id": d.source_id, "similarity": d.similarity}

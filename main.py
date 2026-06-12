@@ -228,7 +228,7 @@ _dev_lan_regex = (
     r"http://(localhost|127\.0\.0\.1|"
     r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
-    r"192\.168\.\d{1,3}\.\d{1,3}):(4200|8000)"
+    r"192\.168\.\d{1,3}\.\d{1,3}):\d{2,5}"  # any port — DEV ONLY (off in production)
 )
 app.add_middleware(
     CORSMiddleware,

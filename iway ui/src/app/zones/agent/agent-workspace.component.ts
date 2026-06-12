@@ -121,7 +121,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               ? 'bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30'
               : 'text-slate-400 hover:bg-slate-50 border border-transparent dark:text-slate-500 dark:hover:bg-slate-800/50'">
             {{f.label}}
-            <span *ngIf="getFilterCount(f.key) > 0" class="px-1 py-0 rounded text-[8px] font-bold"
+            <span *ngIf="getFilterCount(f.key) > 0" class="px-1 py-0 rounded text-[10px] font-bold"
               [class]="currentFilter() === f.key
                 ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300'
                 : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'">
@@ -167,22 +167,22 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <span class="w-2 h-2 rounded-full flex-shrink-0"
                   [class]="item.status === 'handoff_pending' ? 'bg-rose-500 animate-pulse' : item.status === 'agent_connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
                 <span class="text-xs font-semibold truncate text-slate-900 dark:text-white">{{item.user_name}}</span>
-                <span *ngIf="isUnseen(item.id)" class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 flex-shrink-0">Nouveau</span>
+                <span *ngIf="isUnseen(item.id)" class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 flex-shrink-0">Nouveau</span>
               </div>
-              <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase flex-shrink-0"
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase flex-shrink-0"
                 [class]="getStatusBadge(item.status)">{{getStatusLabel(item.status)}}</span>
             </div>
             <p class="text-[10px] truncate mb-1 text-slate-500 dark:text-slate-500">
               {{item.reason || item.last_message || 'Pas de messages'}}
             </p>
             <div class="flex items-center justify-between">
-              <span class="text-[9px] text-slate-400 dark:text-slate-600">{{item.message_count}} msgs</span>
+              <span class="text-[10px] text-slate-400 dark:text-slate-600">{{item.message_count}} msgs</span>
               <div class="flex items-center gap-2">
-                <span *ngIf="item.last_ai_confidence !== null" class="text-[9px] px-1.5 py-0.5 rounded"
+                <span *ngIf="item.last_ai_confidence !== null" class="text-[10px] px-1.5 py-0.5 rounded"
                   [class]="getConfidenceClass(item.last_ai_confidence)">
                   {{item.last_ai_confidence}}%
                 </span>
-                <span class="text-[9px] flex items-center gap-0.5"
+                <span class="text-[10px] flex items-center gap-0.5"
                   [class]="isOverdue(item) ? 'text-rose-500 dark:text-rose-400 font-semibold' : 'text-slate-400 dark:text-slate-600'"
                   [title]="formatTime(item.created_at)">
                   <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -321,36 +321,36 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <div class="flex items-center justify-between mb-2">
                       <div class="flex items-center gap-1.5">
                         <input type="checkbox" [(ngModel)]="pair.selected" class="w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer" />
-                        <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
                           [class]="pair.knowledge_type === 'general'
                             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
                             : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">
                           {{pair.knowledge_type === 'general' ? '🟢 Générale' : '🟡 Procédurale'}}
                         </span>
-                        <span class="px-1.5 py-0.5 rounded text-[8px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{pair.topic}}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{pair.topic}}</span>
                       </div>
                     </div>
                     <div class="space-y-1.5">
                       <div>
-                        <label class="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Question</label>
+                        <label class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Question</label>
                         <input [(ngModel)]="pair.question" class="w-full px-2.5 py-1.5 mt-0.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 bg-white border border-slate-200 text-slate-900 dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
                       </div>
                       <div>
-                        <label class="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Réponse</label>
+                        <label class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Réponse</label>
                         <textarea [(ngModel)]="pair.answer" rows="2" class="w-full px-2.5 py-1.5 mt-0.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none bg-white border border-slate-200 text-slate-900 dark:bg-slate-800 dark:border-slate-700 dark:text-white"></textarea>
                       </div>
                     </div>
-                    <p class="text-[9px] mt-1.5 italic text-slate-400 dark:text-slate-500">{{pair.reason}}</p>
+                    <p class="text-[10px] mt-1.5 italic text-slate-400 dark:text-slate-500">{{pair.reason}}</p>
                   </div>
 
                   <!-- Personal (blocked) -->
                   <div *ngIf="pair.knowledge_type === 'personal'" class="rounded-xl p-3 border border-rose-200 bg-rose-50/50 dark:bg-rose-500/5 dark:border-rose-500/20">
                     <div class="flex items-center gap-1.5 mb-1.5">
-                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400">🔴 Donnée personnelle</span>
-                      <span class="px-1.5 py-0.5 rounded text-[8px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{pair.topic}}</span>
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400">🔴 Donnée personnelle</span>
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{pair.topic}}</span>
                     </div>
                     <p class="text-[10px] text-rose-700 dark:text-rose-300">{{pair.answer}}</p>
-                    <p class="text-[9px] mt-1 italic text-rose-500/70 dark:text-rose-400/50">ℹ️ {{pair.reason}} — Non sauvegardable.</p>
+                    <p class="text-[10px] mt-1 italic text-rose-500/70 dark:text-rose-400/50">ℹ️ {{pair.reason}} — Non sauvegardable.</p>
                   </div>
                 </ng-container>
 
@@ -409,7 +409,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-2">
                     <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Résumé IA</span>
-                    <span *ngIf="briefingLoading()" class="text-[9px] animate-pulse text-indigo-500 dark:text-indigo-400">Chargement...</span>
+                    <span *ngIf="briefingLoading()" class="text-[10px] animate-pulse text-indigo-500 dark:text-indigo-400">Chargement...</span>
                   </div>
                   <p class="text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                     {{briefing()!.ai_summary}}
@@ -419,14 +419,14 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   <app-confidence-gauge *ngIf="briefing()!.last_ai_confidence !== null"
                     [value]="briefing()!.last_ai_confidence!" [size]="72" [strokeWidth]="5"></app-confidence-gauge>
                   <div class="flex items-center gap-1.5">
-                    <span class="text-[9px] text-slate-400 dark:text-slate-500">Durée</span>
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span class="text-[10px] text-slate-400 dark:text-slate-500">Durée</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {{briefing()!.duration_minutes}} min
                     </span>
                   </div>
                   <div class="flex items-center gap-1.5">
-                    <span class="text-[9px] text-slate-400 dark:text-slate-500">Messages</span>
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span class="text-[10px] text-slate-400 dark:text-slate-500">Messages</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {{briefing()!.message_count}}
                     </span>
                   </div>
@@ -435,8 +435,8 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
               <!-- Topics -->
               <div *ngIf="briefing()!.topics.length > 0" class="flex items-center gap-1.5 mb-3">
-                <span class="text-[9px] font-semibold text-slate-400 dark:text-slate-500">Sujets:</span>
-                <span *ngFor="let topic of briefing()!.topics" class="px-2 py-0.5 rounded-full text-[9px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
+                <span class="text-[10px] font-semibold text-slate-400 dark:text-slate-500">Sujets:</span>
+                <span *ngFor="let topic of briefing()!.topics" class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
                   {{topic}}
                 </span>
               </div>
@@ -444,7 +444,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               <!-- Trigger Message (AI response that caused escalation) -->
               <div *ngIf="briefing()!.trigger_message" class="rounded-xl p-3 border bg-rose-50 border-rose-200 dark:bg-rose-500/5 dark:border-rose-500/20">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-[9px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
                     Réponse IA ayant déclenché l'escalade ({{briefing()!.trigger_message!.confidence}}%)
                   </span>
                 </div>
@@ -477,7 +477,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               <div class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <div class="flex items-center gap-1.5 mb-3">
                   <svg class="w-3 h-3 text-slate-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Chronologie</span>
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Chronologie</span>
                 </div>
                 <div class="relative pl-4">
                   <!-- Vertical line -->
@@ -488,7 +488,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-indigo-500 border-indigo-300 dark:border-indigo-400"></div>
                     <div>
                       <span class="text-[10px] font-medium text-slate-700 dark:text-slate-300">Chat démarré</span>
-                      <span class="text-[9px] ml-1 text-slate-400 dark:text-slate-600">par {{briefing()!.client.name}}</span>
+                      <span class="text-[10px] ml-1 text-slate-400 dark:text-slate-600">par {{briefing()!.client.name}}</span>
                     </div>
                   </div>
 
@@ -508,7 +508,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-rose-500 border-rose-400"></div>
                     <div>
                       <span class="text-[10px] font-medium text-rose-700 dark:text-rose-300">Handoff déclenché</span>
-                      <p class="text-[9px] mt-0.5 truncate max-w-[200px] text-slate-400 dark:text-slate-500">{{briefing()!.escalation_reason}}</p>
+                      <p class="text-[10px] mt-0.5 truncate max-w-[200px] text-slate-400 dark:text-slate-500">{{briefing()!.escalation_reason}}</p>
                     </div>
                   </div>
 
@@ -527,7 +527,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <!-- Dossier tab -->
                 <div *ngIf="contextTab() === 'dossier'">
                   <div *ngIf="clientContext()?.mode === 'mock'" class="px-4 pt-3 -mb-1">
-                    <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400">Démo</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400">Démo</span>
                   </div>
 
                   <!-- Loading -->
@@ -550,7 +550,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <div class="space-y-3">
                   <!-- Contrat -->
                   <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
-                    <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">Contrat</div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">Contrat</div>
                     <div *ngIf="clientContext()?.contrat as c; else noContrat" class="space-y-1 text-[11px] text-slate-700 dark:text-slate-300">
                       <div class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Police</span><span class="font-medium">{{c.num_police || '—'}}</span></div>
                       <div *ngIf="c.produit" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Produit</span><span class="font-medium">{{c.produit}}</span></div>
@@ -563,14 +563,14 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
                   <!-- Bénéficiaires -->
                   <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
-                    <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">
+                    <div class="text-[10px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">
                       Bénéficiaires
                       <span *ngIf="clientContext()?.beneficiaires?.nombre_beneficiaires != null">({{clientContext()?.beneficiaires?.nombre_beneficiaires}})</span>
                     </div>
                     <div *ngIf="clientContext()?.beneficiaires?.beneficiaires?.length; else noBenef" class="space-y-1">
                       <div *ngFor="let b of clientContext()?.beneficiaires?.beneficiaires" class="flex items-center justify-between text-[11px]">
                         <span class="text-slate-700 dark:text-slate-300">{{b.nom}}</span>
-                        <span class="px-1.5 py-0.5 rounded text-[8px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{b.lien}}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{b.lien}}</span>
                       </div>
                     </div>
                     <ng-template #noBenef><p class="text-[10px] text-slate-400 dark:text-slate-500">Non disponible</p></ng-template>
@@ -579,7 +579,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
                 <!-- Remboursements -->
                 <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
-                  <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">Remboursements récents</div>
+                  <div class="text-[10px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">Remboursements récents</div>
                   <div *ngIf="clientContext()?.remboursements?.dossiers?.length; else noRemb" class="space-y-1.5">
                     <div *ngFor="let d of clientContext()?.remboursements?.dossiers" class="flex items-center justify-between text-[11px] border-b border-slate-100 dark:border-slate-700/50 pb-1 last:border-0 last:pb-0">
                       <div class="min-w-0">
@@ -588,7 +588,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                       </div>
                       <div class="flex items-center gap-2 flex-shrink-0">
                         <span *ngIf="d.montant != null" class="text-slate-500 dark:text-slate-400">{{d.montant}} TND</span>
-                        <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
                           [class]="d.status === 'rembourse' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">{{d.status}}</span>
                       </div>
                     </div>
@@ -598,7 +598,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
                 <!-- Réclamations -->
                 <div class="rounded-xl p-3 border bg-white border-slate-200 dark:bg-slate-800/40 dark:border-slate-700">
-                  <div class="text-[9px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">
+                  <div class="text-[10px] font-bold uppercase tracking-wider mb-2 text-slate-400 dark:text-slate-500">
                     Réclamations
                     <span *ngIf="clientContext()?.reclamations?.nombre_reclamations != null">({{clientContext()?.reclamations?.nombre_reclamations}})</span>
                   </div>
@@ -608,7 +608,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                         <span class="font-medium text-slate-700 dark:text-slate-300">{{r.numero}}</span>
                         <span class="text-slate-400 dark:text-slate-500 ml-1.5 truncate">{{r.objet}}</span>
                       </div>
-                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase flex-shrink-0"
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase flex-shrink-0"
                         [class]="r.statut === 'Clôturé' ? 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">{{r.statut}}</span>
                     </div>
                   </div>
@@ -634,7 +634,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
               </div>
               <!-- User -->
               <div *ngSwitchCase="'user'" class="flex justify-start gap-2">
-                <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-1 text-[9px] font-bold text-white" style="background: #6366f1;">U</div>
+                <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-1 text-[10px] font-bold text-white" style="background: #6366f1;">U</div>
                 <div class="max-w-[70%] px-3 py-2.5 rounded-xl rounded-bl-md text-sm bg-indigo-50 border border-indigo-100 text-indigo-900 dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:text-indigo-200">
                   {{msg.content}}
                 </div>
@@ -651,7 +651,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <div>
                   <!-- Handoff badge -->
                   <div *ngIf="msg.is_handoff_ai" class="mb-0.5">
-                    <span class="text-[8px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">En attente agent</span>
+                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">En attente agent</span>
                   </div>
                   <div class="max-w-[70%] px-3 py-2.5 rounded-xl rounded-bl-md text-sm"
                     [class]="msg.is_handoff_ai
@@ -661,7 +661,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                   </div>
                   <!-- Confidence badge -->
                   <div *ngIf="msg.confidence" class="mt-0.5">
-                    <span class="text-[8px] font-medium px-1.5 py-0.5 rounded"
+                    <span class="text-[10px] font-medium px-1.5 py-0.5 rounded"
                       [class]="getConfidenceClass(msg.confidence)">
                       Confiance: {{msg.confidence}}%
                     </span>
@@ -696,7 +696,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
             <!-- Grounded badge after a suggestion -->
             <div *ngIf="lastSuggestionGrounded() !== null" class="mb-1.5">
-              <span class="text-[9px] font-medium px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+              <span class="text-[10px] font-medium px-1.5 py-0.5 rounded inline-flex items-center gap-1"
                 [class]="lastSuggestionGrounded()
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
                   : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'">
@@ -714,7 +714,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
               </button>
             </form>
-            <p class="text-[9px] mt-1.5 text-slate-400 dark:text-slate-600">Entrée pour envoyer · Maj+Entrée pour un saut de ligne · une proposition IA doit toujours être relue</p>
+            <p class="text-[10px] mt-1.5 text-slate-400 dark:text-slate-600">Entrée pour envoyer · Maj+Entrée pour un saut de ligne · une proposition IA doit toujours être relue</p>
           </div>
             </div>
           </div>

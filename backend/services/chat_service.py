@@ -517,6 +517,12 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "source": "claims_graph",
                                 "tools_called": tools_called,
                                 "intent": ai_result.get("intent"),
+                                # Structured personal records → rendered as claim cards.
+                                # Live payload only: goes to the OWNING user's authed
+                                # socket, never cached (personal tools are uncacheable
+                                # per cache_policy) and never persisted (history below
+                                # stores text only).
+                                "records": ai_result.get("records") if tools_called else None,
                             })
                             await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], path="graph")
 
@@ -552,6 +558,12 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "source": "claims_graph",
                                 "tools_called": tools_called,
                                 "intent": ai_result.get("intent"),
+                                # Structured personal records → rendered as claim cards.
+                                # Live payload only: goes to the OWNING user's authed
+                                # socket, never cached (personal tools are uncacheable
+                                # per cache_policy) and never persisted (history below
+                                # stores text only).
+                                "records": ai_result.get("records") if tools_called else None,
                             })
                             session["history"].append({
                                 "role": "assistant",

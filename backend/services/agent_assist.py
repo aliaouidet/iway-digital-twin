@@ -239,7 +239,7 @@ def norm_real_dossier_row(row) -> dict:
     if not isinstance(row, dict):
         return {}
     return {
-        "id": _pick(row, "numdossier", "num_dossier", "numero", "reference", "ref"),
+        "id": _pick(row, "id", "numdossier", "num_dossier", "numero", "reference", "ref"),
         "type": _pick(row, "type", "nature", "libelle", "acte"),
         "montant": _pick(row, "montant", "mnttotal", "mnt", "total", "mntdossier"),
         "status": _pick(row, "statut", "status", "etat"),

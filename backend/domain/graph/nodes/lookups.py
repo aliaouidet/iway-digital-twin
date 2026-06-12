@@ -155,11 +155,21 @@ async def dossier_lookup_node(state: ClaimsGraphState) -> dict:
                 logger.warning(f"⚠️ Remboursements fetch failed ({remboursements}); continuing with contrat only")
                 remboursements = None
 
+            # Normalize onto the canonical shape (the same one the mock emits and
+            # the chat claim-cards render) — raw _project_row rows keep SOAP key
+            # names (numDossier/mnt*/statut) that neither the cards nor the LLM
+            # prompt should have to guess at.
+            from backend.services.agent_assist import norm_real_contrat, norm_real_dossier_row
+            totaux = (remboursements or {}).get("totaux") or {}
             records = {
-                "contrat": contrat,
+                "contrat": norm_real_contrat(contrat, totaux),
                 "remboursements": remboursements,
                 # "dossiers" key kept so draft_response_node detects DB data
-                "dossiers": (remboursements or {}).get("dossiers", []),
+                "dossiers": [
+                    norm_real_dossier_row(r)
+                    for r in (remboursements or {}).get("dossiers", [])
+                ],
+                "total_rembourse_2026": totaux.get("total_rembourse"),
             }
             logger.info(
                 f"Dossier lookup (real API) ok — "

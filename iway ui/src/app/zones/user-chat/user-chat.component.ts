@@ -20,6 +20,9 @@ interface ChatMessage {
   isStreaming?: boolean;
   is_handoff_ai?: boolean;
   confidence?: number;
+  /** Structured personal records (dossiers/bénéficiaires/réclamations…) —
+   *  rendered as claim cards under the bubble. Live payload only, never persisted. */
+  records?: any;
 }
 
 interface ChatThread {
@@ -104,11 +107,11 @@ interface ChatThread {
                 class="w-full text-left p-2.5 rounded-xl transition-all cursor-pointer mb-1"
                 [class]="getChatItemClass(chat)">
                 <div class="flex items-center justify-between mb-0.5">
-                  <span class="text-[9px] font-medium text-slate-400 dark:text-slate-500">{{formatDate(chat.created_at)}}</span>
-                  <span *ngIf="chat.status === 'handoff_pending'" class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">Agent</span>
+                  <span class="text-[10px] font-medium text-slate-400 dark:text-slate-500">{{formatDate(chat.created_at)}}</span>
+                  <span *ngIf="chat.status === 'handoff_pending'" class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">Agent</span>
                 </div>
                 <p class="text-[11px] truncate text-slate-600 dark:text-slate-400">{{chat.last_message || 'Nouvelle conversation'}}</p>
-                <span class="text-[9px] mt-0.5 block text-slate-400 dark:text-slate-600">{{chat.message_count}} messages</span>
+                <span class="text-[10px] mt-0.5 block text-slate-400 dark:text-slate-600">{{chat.message_count}} messages</span>
               </button>
               <div *ngIf="activeThreads().length === 0" class="text-center py-4">
                 <p class="text-[10px] text-slate-400 dark:text-slate-600">Aucune conversation active</p>
@@ -131,11 +134,11 @@ interface ChatThread {
                 class="w-full text-left p-2.5 rounded-xl transition-all cursor-pointer mb-1"
                 [class]="getChatItemClass(chat)">
                 <div class="flex items-center justify-between mb-0.5">
-                  <span class="text-[9px] font-medium text-slate-400 dark:text-slate-500">{{formatDate(chat.created_at)}}</span>
-                  <span class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">Résolu</span>
+                  <span class="text-[10px] font-medium text-slate-400 dark:text-slate-500">{{formatDate(chat.created_at)}}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">Résolu</span>
                 </div>
                 <p class="text-[11px] truncate text-slate-600 dark:text-slate-400">{{chat.last_message || 'Nouvelle conversation'}}</p>
-                <span class="text-[9px] mt-0.5 block text-slate-400 dark:text-slate-600">{{chat.message_count}} messages</span>
+                <span class="text-[10px] mt-0.5 block text-slate-400 dark:text-slate-600">{{chat.message_count}} messages</span>
               </button>
               <div *ngIf="resolvedThreads().length === 0" class="text-center py-4">
                 <p class="text-[10px] text-slate-400 dark:text-slate-600">Aucune conversation résolue</p>
@@ -169,7 +172,7 @@ interface ChatThread {
                       'bg-slate-400 dark:bg-slate-500': connectionState() === 'idle'
                     }"></span>
                 </span>
-                <span class="text-[9px] md:text-[10px] font-medium text-slate-400 dark:text-slate-500">{{connectionLabel()}}</span>
+                <span class="text-[10px] md:text-[10px] font-medium text-slate-400 dark:text-slate-500">{{connectionLabel()}}</span>
               </div>
             </div>
           </div>
@@ -193,7 +196,7 @@ interface ChatThread {
           <div class="min-w-0">
             <p class="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
               Un agent va vous rejoindre bientôt
-              <span *ngIf="handoffPosition()" class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+              <span *ngIf="handoffPosition()" class="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
                 Position {{handoffPosition()}}<span *ngIf="handoffWaitMin()"> · ≈ {{handoffWaitMin()}} min</span>
               </span>
             </p>
@@ -255,20 +258,26 @@ interface ChatThread {
           </div>
 
           <!-- Message Bubbles -->
-          <div *ngFor="let msg of messages(); trackBy: trackByIdx">
+          <div *ngFor="let msg of messages(); let i = index; trackBy: trackByIdx">
+            <!-- Day separator -->
+            <div *ngIf="isNewDay(i)" class="flex justify-center my-3">
+              <span class="px-3 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-400 dark:bg-slate-800/60 dark:text-slate-500">{{dayLabel(msg.timestamp)}}</span>
+            </div>
             <!-- System Message -->
             <div *ngIf="msg.role === 'system'" class="flex justify-center">
               <div class="px-4 py-2 rounded-full text-xs font-medium bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500" [innerHTML]="formatMessage(msg.content)">
               </div>
             </div>
             <!-- User Message -->
-            <div *ngIf="msg.role === 'user'" class="flex justify-end">
+            <div *ngIf="msg.role === 'user'" class="flex flex-col items-end">
               <div class="max-w-[75%] px-4 py-3 rounded-2xl rounded-br-md text-sm bg-indigo-600 text-white" [innerHTML]="formatMessage(msg.content)">
               </div>
+              <span *ngIf="msg.timestamp" class="text-[10px] text-slate-400 dark:text-slate-600 mt-1 mr-1">{{formatTime(msg.timestamp)}}</span>
             </div>
             <!-- AI / Agent Message -->
             <div *ngIf="msg.role === 'assistant' || msg.role === 'agent'" class="flex justify-start gap-2.5">
               <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-1"
+                [class.invisible]="isGroupedWith(i)"
                 [ngClass]="{
                   'bg-amber-100 dark:bg-amber-500/20': msg.role === 'agent',
                   'bg-orange-50 dark:bg-orange-500/10': msg.role !== 'agent' && msg.is_handoff_ai,
@@ -278,20 +287,119 @@ interface ChatThread {
                 <svg *ngIf="msg.is_handoff_ai" class="w-3.5 h-3.5 text-orange-500 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 <svg *ngIf="msg.role === 'agent'" class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
               </div>
-              <div>
+              <div class="flex-1 min-w-0">
+                <!-- Sender label (first message of a group) -->
+                <div *ngIf="!isGroupedWith(i)" class="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mb-0.5 ml-1">
+                  {{msg.role === 'agent' ? (agentName() || 'Agent I-Way') : 'Assistant I-Way'}}
+                </div>
                 <!-- Handoff AI badge -->
                 <div *ngIf="msg.is_handoff_ai" class="mb-1">
-                  <span class="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/20">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/20">
                     ⏳ En attendant l'agent
                   </span>
                 </div>
-                <div class="max-w-[75%] px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm border"
-                  [ngClass]="{
-                    'bg-orange-50 border-orange-200 text-orange-900 dark:bg-orange-500/5 dark:border-orange-500/20 dark:text-orange-200': msg.is_handoff_ai,
-                    'bg-white border-slate-200 text-slate-700 dark:bg-[#0F172A] dark:border-slate-800 dark:text-slate-300': !msg.is_handoff_ai
-                  }">
-                  <span [innerHTML]="formatMessage(msg.content)"></span><span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 ml-0.5 rounded-sm animate-pulse bg-indigo-500 dark:bg-indigo-400"></span>
+                <div class="group relative max-w-[75%] w-fit">
+                  <div class="px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm border"
+                    [ngClass]="{
+                      'bg-orange-50 border-orange-200 text-orange-900 dark:bg-orange-500/5 dark:border-orange-500/20 dark:text-orange-200': msg.is_handoff_ai,
+                      'bg-white border-slate-200 text-slate-700 dark:bg-[#0F172A] dark:border-slate-800 dark:text-slate-300': !msg.is_handoff_ai
+                    }">
+                    <span [innerHTML]="formatMessage(msg.content)"></span><span *ngIf="msg.isStreaming" class="inline-block w-1.5 h-4 ml-0.5 rounded-sm animate-pulse bg-indigo-500 dark:bg-indigo-400"></span>
+                  </div>
+                  <!-- Copy (hover) -->
+                  <button *ngIf="msg.role === 'assistant' && !msg.isStreaming" (click)="copyMessage(msg.content)" type="button" aria-label="Copier la réponse"
+                    class="absolute -right-2 -top-2 w-6 h-6 rounded-lg hidden group-hover:flex items-center justify-center cursor-pointer shadow-sm bg-white border border-slate-200 text-slate-400 hover:text-indigo-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-500 dark:hover:text-indigo-400">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                  </button>
                 </div>
+
+                <!-- Claim cards (structured records — live payload only) -->
+                <div *ngIf="msg.records as r" class="mt-2 max-w-md space-y-2">
+                  <!-- Honest degradation -->
+                  <div *ngIf="r.service_indisponible" class="rounded-xl border px-3 py-2.5 text-xs flex items-start gap-2 bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-300">
+                    <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                    <span>Service I-Way temporairement indisponible — vos données n'ont pas pu être vérifiées.</span>
+                  </div>
+
+                  <!-- Dossiers de remboursement -->
+                  <div *ngFor="let d of r.dossiers" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-xs font-bold font-mono text-slate-800 dark:text-white truncate">{{d.id || d.num_dossier || 'Dossier'}}</span>
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex-shrink-0" [class]="recordStatusClass(d.status)">{{recordStatusLabel(d.status)}}</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-2 mt-1.5 text-xs">
+                      <span class="text-slate-500 dark:text-slate-400 capitalize truncate">{{d.type || 'Soins'}}<ng-container *ngIf="d.date_soins"> · {{d.date_soins}}</ng-container></span>
+                      <span class="font-semibold text-slate-700 dark:text-slate-200 flex-shrink-0">
+                        <ng-container *ngIf="d.montant != null">{{d.montant}} TND</ng-container>
+                        <span *ngIf="d.montant_rembourse != null" class="text-emerald-600 dark:text-emerald-400"> → {{d.montant_rembourse}} TND</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Plafond annuel -->
+                  <div *ngIf="r.plafond_annuel" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="flex items-center justify-between text-[11px] mb-1.5">
+                      <span class="text-slate-500 dark:text-slate-400">Plafond annuel consommé</span>
+                      <span class="font-bold text-slate-700 dark:text-slate-200">{{r.total_rembourse_2026 || 0}} / {{r.plafond_annuel}} TND</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                      <div class="h-full rounded-full transition-all bg-gradient-to-r from-indigo-500 to-emerald-500" [style.width.%]="plafondPct(r)"></div>
+                    </div>
+                  </div>
+
+                  <!-- Bénéficiaires -->
+                  <div *ngIf="r.beneficiaires?.length" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Bénéficiaires ({{r.beneficiaires.length}})</div>
+                    <div *ngFor="let b of r.beneficiaires" class="flex items-center justify-between gap-2 text-xs py-1 border-b last:border-0 border-slate-100 dark:border-slate-700/50">
+                      <span class="flex items-center gap-1.5 text-slate-700 dark:text-slate-200 truncate">
+                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" [class]="b.couverture_active === false ? 'bg-rose-500' : 'bg-emerald-500'"></span>
+                        {{b.nom_complet || b.nom}}
+                      </span>
+                      <span *ngIf="b.lien" class="px-1.5 py-0.5 rounded text-[10px] capitalize flex-shrink-0 bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">{{b.lien}}</span>
+                    </div>
+                  </div>
+
+                  <!-- Réclamations -->
+                  <div *ngIf="r.reclamations?.length" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Réclamations ({{r.reclamations.length}})</div>
+                    <div *ngFor="let rec of r.reclamations" class="py-1.5 border-b last:border-0 border-slate-100 dark:border-slate-700/50">
+                      <div class="flex items-center justify-between gap-2 text-xs">
+                        <span class="font-mono font-bold text-slate-800 dark:text-white truncate">{{rec.numero}}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex-shrink-0" [class]="reclStatusClass(rec.statut)">{{rec.statut || 'En cours'}}</span>
+                      </div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">{{rec.objet}}<ng-container *ngIf="rec.date"> · {{rec.date}}</ng-container></div>
+                      <div *ngIf="rec.reponse" class="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">↳ {{rec.reponse}}</div>
+                    </div>
+                  </div>
+
+                  <!-- Détail d'un dossier -->
+                  <div *ngIf="r.dossier_detail as dd" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="flex items-center justify-between gap-2 mb-1.5">
+                      <span class="text-xs font-bold font-mono text-slate-800 dark:text-white">{{dd.num_dossier || 'Détail du dossier'}}</span>
+                      <span *ngIf="dd.statut" class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" [class]="recordStatusClass(dd.statut)">{{recordStatusLabel(dd.statut)}}</span>
+                    </div>
+                    <div class="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                      <div *ngIf="dd.date" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Date</span><span>{{dd.date}}</span></div>
+                      <div *ngIf="dd.beneficiaire" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Bénéficiaire</span><span>{{dd.beneficiaire}}</span></div>
+                      <div *ngIf="dd.actes?.length" class="flex justify-between gap-3"><span class="text-slate-400 dark:text-slate-500 flex-shrink-0">Actes</span><span class="text-right">{{dd.actes.join(', ')}}</span></div>
+                      <div *ngIf="dd.montant_total != null" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Montant</span><span class="font-semibold">{{dd.montant_total}} TND</span></div>
+                      <div *ngIf="dd.montant_rembourse != null" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Remboursé</span><span class="font-semibold text-emerald-600 dark:text-emerald-400">{{dd.montant_rembourse}} TND<ng-container *ngIf="dd.taux_remboursement"> ({{dd.taux_remboursement}}%)</ng-container></span></div>
+                    </div>
+                  </div>
+
+                  <!-- Contrat -->
+                  <div *ngIf="r.contrat as c" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Contrat</div>
+                    <div class="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                      <div *ngIf="c.num_police" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Police</span><span class="font-mono">{{c.num_police}}</span></div>
+                      <div *ngIf="c.titulaire" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Titulaire</span><span>{{c.titulaire}}</span></div>
+                      <div *ngIf="c.produit" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Produit</span><span>{{c.produit}}</span></div>
+                      <div *ngIf="c.statut" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Statut</span><span>{{c.statut}}</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <span *ngIf="msg.timestamp && !msg.isStreaming" class="block text-[10px] text-slate-400 dark:text-slate-600 mt-1 ml-1">{{formatTime(msg.timestamp)}}</span>
               </div>
             </div>
           </div>
@@ -773,6 +881,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             isStreaming: false,
             is_handoff_ai: msg.is_handoff_ai || false,
             confidence: msg.confidence,
+            records: msg.records || undefined,
+            timestamp: new Date().toISOString(),
           }]);
         } else if (msg.text) {
           // No streaming bubble (the normal graph path streams no tokens):
@@ -782,6 +892,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             content: msg.text,
             is_handoff_ai: msg.is_handoff_ai || false,
             confidence: msg.confidence,
+            records: msg.records || undefined,
+            timestamp: new Date().toISOString(),
           }]);
         }
         this.streamingContent = '';
@@ -843,7 +955,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
 
     // Lazy session creation: if no session exists yet, create one first
     if (!this.sessionId) {
-      this.messages.update(m => [...m, { role: 'user', content }]);
+      this.messages.update(m => [...m, { role: 'user', content, timestamp: new Date().toISOString() }]);
       this.isThinking.set(true);
       this.thinkingStatus.set('Création de la session...');
       this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
@@ -863,7 +975,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     }
 
     // Normal path: session already exists
-    this.messages.update(m => [...m, { role: 'user', content }]);
+    this.messages.update(m => [...m, { role: 'user', content, timestamp: new Date().toISOString() }]);
     if (this.socket$ && this.isConnected()) {
       this.socket$.next({ type: 'user_message', content });
     } else {
@@ -879,6 +991,76 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   sendQuickQuestion(q: string): void {
     this.newMessage = q;
     this.sendMessage();
+  }
+
+  // ─── Message presentation helpers ───
+
+  formatTime(ts?: string): string {
+    if (!ts) return '';
+    try {
+      return new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    } catch { return ''; }
+  }
+
+  /** Consecutive assistant/agent messages share one avatar + sender label. */
+  isGroupedWith(i: number): boolean {
+    const msgs = this.messages();
+    const prev = msgs[i - 1];
+    const cur = msgs[i];
+    return !!prev && !!cur && prev.role === cur.role
+      && (cur.role === 'assistant' || cur.role === 'agent');
+  }
+
+  isNewDay(i: number): boolean {
+    const msgs = this.messages();
+    const cur = msgs[i];
+    if (!cur?.timestamp) return false;
+    const prevTs = msgs.slice(0, i).reverse().find(m => m.timestamp)?.timestamp;
+    if (!prevTs) return true;
+    return new Date(cur.timestamp).toDateString() !== new Date(prevTs).toDateString();
+  }
+
+  dayLabel(ts?: string): string {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (d.toDateString() === new Date().toDateString()) return "Aujourd'hui";
+    return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  copyMessage(content: string): void {
+    navigator.clipboard?.writeText(content).then(
+      () => this.toastService.show('Réponse copiée', 'success'),
+      () => this.toastService.show('Copie impossible', 'error'),
+    );
+  }
+
+  // ─── Claim-card helpers ───
+
+  recordStatusClass(status?: string): string {
+    const s = (status || '').toLowerCase();
+    if (s.includes('rembours') || s.includes('regl')) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400';
+    if (s.includes('rejet') || s.includes('refus')) return 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400';
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
+  }
+
+  recordStatusLabel(status?: string): string {
+    if (!status) return 'En cours';
+    if (status === 'rembourse') return 'Remboursé';
+    if (status === 'en_cours') return 'En cours';
+    return status;
+  }
+
+  reclStatusClass(statut?: string): string {
+    const s = (statut || '').toLowerCase();
+    if (s.includes('clôtur') || s.includes('clotur') || s.includes('trait')) return 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400';
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
+  }
+
+  plafondPct(r: any): number {
+    const plafond = Number(r?.plafond_annuel) || 0;
+    const used = Number(r?.total_rembourse_2026) || 0;
+    if (!plafond) return 0;
+    return Math.max(0, Math.min(100, Math.round((used / plafond) * 100)));
   }
 
   requestHandoff(): void {

@@ -1,4 +1,4 @@
-import { Component, OnInit, ChangeDetectionStrategy, signal, DestroyRef, inject } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy, signal, DestroyRef, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
@@ -7,6 +7,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { auditTime } from 'rxjs/operators';
 import { MetricsService, OpsMetrics } from '../../../core/services/metrics.service';
 import { WebSocketService } from '../../../core/services/websocket.service';
+import { ThemeService } from '../../../core/services/theme.service';
 import { DashboardMetrics } from '../../../shared/models';
 
 @Component({
@@ -34,10 +35,39 @@ export class DashboardComponent implements OnInit {
 
   private destroyRef = inject(DestroyRef);
 
+  private lastHourly: { hour: number; label: string; count: number }[] | null = null;
+
   constructor(
     private metricsService: MetricsService,
-    private wsService: WebSocketService
-  ) {}
+    private wsService: WebSocketService,
+    private themeService: ThemeService,
+  ) {
+    // Rebuild charts when the theme flips — chart colors were previously
+    // hardcoded dark and unreadable in light mode.
+    effect(() => {
+      this.themeService.theme(); // track
+      const m = this.metrics();
+      if (m) this.buildCharts(m);
+      if (this.lastHourly) this.buildTrafficChart(this.lastHourly);
+    });
+  }
+
+  /** ECharts colors derived from the active theme. */
+  private chartPalette() {
+    const dark = this.themeService.isDark();
+    return {
+      tooltipBg: dark ? '#1E293B' : '#FFFFFF',
+      tooltipBorder: dark ? '#334155' : '#E2E8F0',
+      tooltipText: dark ? '#F8FAFC' : '#0F172A',
+      axisLine: dark ? '#334155' : '#CBD5E1',
+      axisLabel: '#64748B',
+      splitLine: dark ? '#1E293B' : '#E2E8F0',
+      legendText: dark ? '#94A3B8' : '#475569',
+      barLabel: dark ? '#94A3B8' : '#475569',
+      pieBorder: dark ? '#0B1120' : '#FFFFFF',
+      emphasisText: dark ? '#F8FAFC' : '#0F172A',
+    };
+  }
 
   ngOnInit(): void {
     this.loadMetrics();
@@ -166,6 +196,7 @@ export class DashboardComponent implements OnInit {
   // --- Charts ---
 
   private buildCharts(data: DashboardMetrics): void {
+    const p = this.chartPalette();
     const days = data.time_series.map(t => t.day);
     const confidences = data.time_series.map(t => t.rag_confidence);
     const responseTimes = data.time_series.map(t => t.response_time);
@@ -173,8 +204,8 @@ export class DashboardComponent implements OnInit {
 
     this.areaChart = {
       tooltip: {
-        trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155',
-        textStyle: { color: '#F8FAFC', fontSize: 12 }, padding: 12,
+        trigger: 'axis', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder,
+        textStyle: { color: p.tooltipText, fontSize: 12 }, padding: 12,
         formatter: (params: any) => {
           let html = `<div style="font-weight:600;margin-bottom:6px">${params[0]?.axisValue}</div>`;
           for (const p of params) {
@@ -188,25 +219,25 @@ export class DashboardComponent implements OnInit {
           return html;
         }
       },
-      legend: { data: ['RAG Confidence', 'Avg Response Time'], bottom: 0, icon: 'circle', textStyle: { color: '#94A3B8' } },
+      legend: { data: ['RAG Confidence', 'Avg Response Time'], bottom: 0, icon: 'circle', textStyle: { color: p.legendText } },
       grid: { left: '3%', right: '5%', bottom: '14%', top: '8%', containLabel: true },
       xAxis: {
         type: 'category', boundaryGap: false, data: days,
-        axisLine: { lineStyle: { color: '#334155' } },
-        axisLabel: { color: '#64748B', fontSize: 11 }
+        axisLine: { lineStyle: { color: p.axisLine } },
+        axisLabel: { color: p.axisLabel, fontSize: 11 }
       },
       yAxis: [
         {
           type: 'value', name: 'Confidence (%)', min: 0, max: 100,
-          splitLine: { lineStyle: { color: '#1E293B', type: 'dashed' } },
-          axisLabel: { color: '#64748B', formatter: '{value}%' },
-          nameTextStyle: { color: '#64748B', padding: [0, 0, 0, 20] }
+          splitLine: { lineStyle: { color: p.splitLine, type: 'dashed' } },
+          axisLabel: { color: p.axisLabel, formatter: '{value}%' },
+          nameTextStyle: { color: p.axisLabel, padding: [0, 0, 0, 20] }
         },
         {
           type: 'value', name: 'Response Time',
           splitLine: { show: false },
-          axisLabel: { color: '#64748B', formatter: (v: number) => `${(v / 1000).toFixed(0)}s` },
-          nameTextStyle: { color: '#64748B' }
+          axisLabel: { color: p.axisLabel, formatter: (v: number) => `${(v / 1000).toFixed(0)}s` },
+          nameTextStyle: { color: p.axisLabel }
         }
       ],
       series: [
@@ -232,14 +263,14 @@ export class DashboardComponent implements OnInit {
     };
 
     this.pieChart = {
-      tooltip: { trigger: 'item', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#F8FAFC' } },
-      legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { color: '#94A3B8' }, icon: 'circle' },
+      tooltip: { trigger: 'item', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder, textStyle: { color: p.tooltipText } },
+      legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { color: p.legendText }, icon: 'circle' },
       series: [{
         name: 'Resolution', type: 'pie', radius: ['55%', '80%'], center: ['50%', '42%'],
         avoidLabelOverlap: false,
-        itemStyle: { borderRadius: 8, borderColor: '#0B1120', borderWidth: 4 },
+        itemStyle: { borderRadius: 8, borderColor: p.pieBorder, borderWidth: 4 },
         label: { show: false },
-        emphasis: { label: { show: true, fontSize: 22, fontWeight: 'bold', color: '#F8FAFC' }, itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
+        emphasis: { label: { show: true, fontSize: 22, fontWeight: 'bold', color: p.emphasisText }, itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
         labelLine: { show: false },
         data: [
           { value: data.rag_resolved, name: 'RAG Resolved', itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: '#34d399'}, {offset: 1, color: '#059669'}]) } },
@@ -253,8 +284,8 @@ export class DashboardComponent implements OnInit {
     // --- Daily Volume Bar Chart ---
     this.dailyVolumeChart = {
       tooltip: {
-        trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155',
-        textStyle: { color: '#F8FAFC', fontSize: 12 },
+        trigger: 'axis', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder,
+        textStyle: { color: p.tooltipText, fontSize: 12 },
         formatter: (params: any) => {
           const p = params[0];
           return `<div style="font-weight:600">${p.axisValue}</div><b>${p.value}</b> queries`;
@@ -263,17 +294,17 @@ export class DashboardComponent implements OnInit {
       grid: { left: '3%', right: '4%', bottom: '5%', top: '12%', containLabel: true },
       xAxis: {
         type: 'category', data: days,
-        axisLine: { lineStyle: { color: '#334155' } },
-        axisLabel: { color: '#64748B', fontSize: 10 }
+        axisLine: { lineStyle: { color: p.axisLine } },
+        axisLabel: { color: p.axisLabel, fontSize: 10 }
       },
       yAxis: {
         type: 'value', minInterval: 1,
-        splitLine: { lineStyle: { color: '#1E293B', type: 'dashed' } },
-        axisLabel: { color: '#64748B' }
+        splitLine: { lineStyle: { color: p.splitLine, type: 'dashed' } },
+        axisLabel: { color: p.axisLabel }
       },
       series: [{
         type: 'bar', barWidth: '50%',
-        label: { show: true, position: 'top', color: '#94A3B8', fontSize: 11, fontWeight: 'bold' },
+        label: { show: true, position: 'top', color: p.barLabel, fontSize: 11, fontWeight: 'bold' },
         itemStyle: {
           borderRadius: [6, 6, 0, 0],
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -286,21 +317,23 @@ export class DashboardComponent implements OnInit {
   }
 
   private buildTrafficChart(hourly: { hour: number; label: string; count: number }[]): void {
+    this.lastHourly = hourly;
+    const p = this.chartPalette();
     const labels = hourly.map(h => h.label);
     const counts = hourly.map(h => h.count);
     const maxCount = Math.max(...counts, 1);
 
     this.trafficChart = {
-      tooltip: { trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#F8FAFC', fontSize: 12 } },
+      tooltip: { trigger: 'axis', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder, textStyle: { color: p.tooltipText, fontSize: 12 } },
       grid: { left: '3%', right: '4%', bottom: '5%', top: '8%', containLabel: true },
       xAxis: {
         type: 'category', data: labels,
-        axisLine: { lineStyle: { color: '#334155' } },
-        axisLabel: { color: '#64748B', fontSize: 9, interval: 1 }
+        axisLine: { lineStyle: { color: p.axisLine } },
+        axisLabel: { color: p.axisLabel, fontSize: 9, interval: 1 }
       },
       yAxis: {
-        type: 'value', splitLine: { lineStyle: { color: '#1E293B', type: 'dashed' } },
-        axisLabel: { color: '#64748B' }, minInterval: 1
+        type: 'value', splitLine: { lineStyle: { color: p.splitLine, type: 'dashed' } },
+        axisLabel: { color: p.axisLabel }, minInterval: 1
       },
       series: [{
         type: 'bar', data: counts.map(c => ({
