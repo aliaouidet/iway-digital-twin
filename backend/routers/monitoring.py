@@ -160,6 +160,101 @@ async def get_knowledge_gaps():
     }
 
 
+# --- Ops snapshot (new telemetry: tokens, cache, escalations, nodes, circuits) ---
+
+def _prom_samples(metric_name: str) -> list:
+    """Read one metric family's samples from the in-process Prometheus registry.
+
+    Returns [] when prometheus_client isn't installed (metrics are no-ops) —
+    the endpoint then reports zeros instead of failing.
+    """
+    try:
+        from prometheus_client import REGISTRY
+        for family in REGISTRY.collect():
+            if family.name == metric_name:
+                return family.samples
+    except Exception:
+        pass
+    return []
+
+
+@router.get("/api/v1/monitoring/ops")
+async def get_ops_metrics(db: AsyncSession = Depends(get_db)):
+    """Operational snapshot for the admin dashboard's AI-Ops section.
+
+    Combines the durable audit log (token usage) with the in-process
+    Prometheus counters (cache hit rate, escalation paths, node latencies)
+    and the resilience/persistence health modules.
+
+    NOTE: the Prometheus-sourced numbers are since-process-start (they reset
+    on API restart); token totals come from PostgreSQL and are durable.
+    """
+    from backend.database.repositories import get_token_stats
+    from backend.services.resilience import get_resilience_status
+    from backend.services.persistence_health import get_persistence_health
+
+    # -- Tokens (durable, from audit_log) --
+    try:
+        tokens = await get_token_stats(db)
+    except Exception as e:
+        logger.warning(f"Token stats unavailable: {e}")
+        tokens = {"total_tokens": 0, "tokens_24h": 0, "llm_requests": 0, "avg_tokens_per_llm_request": 0}
+
+    # -- Cache hit rate (process counters) --
+    hits = misses = 0.0
+    for s in _prom_samples("iway_semantic_cache_lookups"):
+        if s.name.endswith("_total"):
+            if s.labels.get("result") == "hit":
+                hits = s.value
+            elif s.labels.get("result") == "miss":
+                misses = s.value
+    lookups = hits + misses
+    cache = {
+        "hits": int(hits),
+        "misses": int(misses),
+        "hit_rate": round(hits / lookups * 100, 1) if lookups else 0.0,
+    }
+
+    # -- Escalations by trigger path --
+    escalations = {}
+    for s in _prom_samples("iway_escalations"):
+        if s.name.endswith("_total"):
+            escalations[s.labels.get("path", "unknown")] = int(s.value)
+
+    # -- Graph node latencies (avg = sum/count from the histogram) --
+    node_sum: dict = {}
+    node_count: dict = {}
+    for s in _prom_samples("iway_graph_node_duration_seconds"):
+        node = s.labels.get("node")
+        if not node:
+            continue
+        if s.name.endswith("_sum"):
+            node_sum[node] = s.value
+        elif s.name.endswith("_count"):
+            node_count[node] = s.value
+    nodes = sorted(
+        (
+            {
+                "node": n,
+                "avg_ms": round(node_sum.get(n, 0) / c * 1000, 1),
+                "calls": int(c),
+            }
+            for n, c in node_count.items() if c
+        ),
+        key=lambda x: x["avg_ms"],
+        reverse=True,
+    )
+
+    return {
+        "tokens": tokens,
+        "cache": cache,
+        "escalations": escalations,
+        "nodes": nodes[:8],
+        "circuits": get_resilience_status()["circuit_breakers"],
+        "persistence": get_persistence_health(),
+    }
+
+
 # --- Real-Time Analytics (Redis Counters) ---
 @router.get("/api/v1/stats/realtime")
 async def get_realtime_stats():

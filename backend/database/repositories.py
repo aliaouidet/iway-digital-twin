@@ -272,6 +272,37 @@ async def get_recent_audit_logs(
     return list(result.scalars().all())
 
 
+async def get_token_stats(db: AsyncSession) -> Dict[str, Any]:
+    """LLM token consumption from the audit log (real usage_metadata counts).
+
+    Durable across restarts — unlike the process-local Prometheus counters.
+    Averages only over requests that actually consumed tokens (cache hits and
+    RAG-only answers legitimately use none).
+    """
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func
+
+    total = await db.scalar(select(func.coalesce(func.sum(AuditLog.tokens_used), 0)))
+
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    last_24h = await db.scalar(
+        select(func.coalesce(func.sum(AuditLog.tokens_used), 0))
+        .where(AuditLog.timestamp >= since)
+    )
+
+    llm_requests = await db.scalar(
+        select(func.count()).select_from(AuditLog).where(AuditLog.tokens_used > 0)
+    )
+    avg_per_request = round((total or 0) / llm_requests) if llm_requests else 0
+
+    return {
+        "total_tokens": int(total or 0),
+        "tokens_24h": int(last_24h or 0),
+        "llm_requests": int(llm_requests or 0),
+        "avg_tokens_per_llm_request": avg_per_request,
+    }
+
+
 async def get_audit_stats(
     db: AsyncSession,
     start_date: Optional[str] = None,
