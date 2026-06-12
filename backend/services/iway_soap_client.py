@@ -42,6 +42,14 @@ from backend.services.resilience import api_circuit, retry_with_backoff
 logger = logging.getLogger("I-Way-Twin")
 settings = get_settings()
 
+# ERP latency is the most failure-prone dependency — make every SOAP call a span.
+try:
+    from opentelemetry import trace as _otel_api
+    from opentelemetry.trace import Status as _OtelStatus, StatusCode as _OtelStatusCode
+    _soap_tracer = _otel_api.get_tracer("iway.soap")
+except ImportError:  # pragma: no cover — telemetry is optional
+    _soap_tracer = None
+
 
 # ──────────────────────────────────────────────────────────────
 # WSDL filenames per service (bundled in IWAY_SOAP_WSDL_DIR)
@@ -199,13 +207,32 @@ async def _call(service_key: str, operation: str, _retries: int = 2, **kwargs) -
     async def _runner():
         return await anyio.to_thread.run_sync(_sync_call)
 
-    return await retry_with_backoff(
-        _runner,
-        max_retries=_retries,
-        base_delay=0.5,
-        operation_name=f"SOAP {service_key}.{operation}",
-        circuit=api_circuit,
-    )
+    async def _invoke():
+        return await retry_with_backoff(
+            _runner,
+            max_retries=_retries,
+            base_delay=0.5,
+            operation_name=f"SOAP {service_key}.{operation}",
+            circuit=api_circuit,
+        )
+
+    if _soap_tracer is None:
+        return await _invoke()
+
+    with _soap_tracer.start_as_current_span(
+        f"soap.{service_key}.{operation}",
+        attributes={
+            "soap.service": service_key,
+            "soap.operation": operation,
+            "soap.max_retries": _retries,
+        },
+    ) as span:
+        try:
+            return await _invoke()
+        except Exception as e:
+            span.set_status(_OtelStatus(_OtelStatusCode.ERROR))
+            span.record_exception(e)
+            raise
 
 
 # ──────────────────────────────────────────────────────────────

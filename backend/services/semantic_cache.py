@@ -97,19 +97,23 @@ async def check_semantic_cache(query: str, similarity_threshold: float = 0.95) -
         )
 
         results = index.query(v_query)
-        
+
         if results:
             best_match = results[0]
             distance = float(best_match.get("vector_distance", 1.0))
             similarity = 1.0 - distance
-            
+
             if similarity >= similarity_threshold:
                 logger.info(f"⚡ Semantic Cache Hit! Similarity: {similarity:.3f} for query: '{query[:30]}...'")
+                from backend.services.metrics import CACHE_LOOKUPS
+                CACHE_LOOKUPS.labels(result="hit").inc()
                 return best_match["response"]
-                
+
     except Exception as e:
         logger.warning(f"Semantic Cache search failed: {e}")
-        
+
+    from backend.services.metrics import CACHE_LOOKUPS
+    CACHE_LOOKUPS.labels(result="miss").inc()
     return None
 
 async def store_semantic_cache(query: str, response: str):

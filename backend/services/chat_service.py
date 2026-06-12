@@ -183,9 +183,9 @@ from backend.services.escalation_flow import send_handoff_started as _hf_send
 
 
 async def _send_handoff_started(websocket, sessions_store: dict, session_id: str,
-                                reason: str, *, degraded: bool = False):
+                                reason: str, *, degraded: bool = False, path: str = "graph"):
     """Thin wrapper kept for call-site stability — delegates to escalation_flow."""
-    await _hf_send(websocket, session_id, reason, degraded=degraded)
+    await _hf_send(websocket, session_id, reason, degraded=degraded, path=path)
 
 
 async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_store: dict,
@@ -469,6 +469,9 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                         claim_status = ai_result.get("claim_status", "active")
                         tools_called = ai_result.get("tools_called", [])
                         confidence = ai_result.get("confidence", 0)
+                        # Real LLM usage captured from on_chat_model_end events —
+                        # finish() keeps this over the legacy per-span word count.
+                        trace.tokens_used = ai_result.get("tokens_used", 0) or 0
 
                         # ═══ ESCALATION / HANDOFF INTERCEPT ═══
                         if claim_status == "pending_human":
@@ -515,7 +518,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "tools_called": tools_called,
                                 "intent": ai_result.get("intent"),
                             })
-                            await _send_handoff_started(websocket, sessions_store, session_id, session["reason"])
+                            await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], path="graph")
 
                             # Notify agent dashboard in real time
                             await ws_manager.broadcast({
@@ -587,7 +590,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "timestamp": datetime.now().isoformat()
                             })
                             asyncio.create_task(_persist_message(session_id, "system", ai_result["text"]))
-                        await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], degraded=True)
+                        await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], degraded=True, path="degraded")
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
                             "payload": {
@@ -622,7 +625,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                                 "timestamp": datetime.now().isoformat()
                             })
                             asyncio.create_task(_persist_message(session_id, "system", sys_msg))
-                        await _send_handoff_started(websocket, sessions_store, session_id, session["reason"])
+                        await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], path="low_confidence")
                         await ws_manager.broadcast({
                             "type": "NEW_ESCALATION",
                             "payload": {
@@ -726,7 +729,7 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     "timestamp": datetime.now().isoformat()
                 })
                 asyncio.create_task(_persist_message(session_id, "system", sys_msg_manual))
-                await _send_handoff_started(websocket, sessions_store, session_id, session["reason"])
+                await _send_handoff_started(websocket, sessions_store, session_id, session["reason"], path="manual")
                 await ws_manager.broadcast({
                     "type": "NEW_ESCALATION",
                     "payload": {

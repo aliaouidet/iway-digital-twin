@@ -1,0 +1,11 @@
+# Prometheus scrape config — the API exposes /metrics via
+# prometheus-fastapi-instrumentator (HTTP latency) + backend/services/metrics.py
+# (cache hit rate, escalations, graph-node durations, LLM tokens, circuits).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: iway-api
+    static_configs:
+      - targets: ["api:8000"]

@@ -7,10 +7,40 @@ Tasks:
 - embed_hitl_response: Embed agent-validated Q&A pairs
 """
 
+import os
+
 from celery import Celery
 from backend.config import get_settings
 
 settings = get_settings()
+
+
+# --- OpenTelemetry for workers (guarded — takes effect after an image rebuild) ---
+# Without this, KB syncs / re-embeds / checkpoint prunes were invisible to Jaeger.
+try:
+    from celery.signals import worker_process_init
+
+    @worker_process_init.connect(weak=False)
+    def _init_otel(*args, **kwargs):
+        try:
+            from opentelemetry import trace
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.instrumentation.celery import CeleryInstrumentor
+
+            provider = TracerProvider(resource=Resource.create({"service.name": "iway-worker"}))
+            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(
+                endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317"),
+                insecure=True,
+            )))
+            trace.set_tracer_provider(provider)
+            CeleryInstrumentor().instrument()
+        except Exception:
+            pass  # telemetry must never break the worker
+except ImportError:  # pragma: no cover
+    pass
 
 celery_app = Celery(
     "iway_worker",

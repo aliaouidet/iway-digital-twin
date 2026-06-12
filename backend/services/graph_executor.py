@@ -138,6 +138,8 @@ async def execute_claims_graph(
     tools_called = []
     active_nodes_seen = set()
     node_timings = {}  # {langgraph_node: {start, end}}
+    tokens_in = 0
+    tokens_out = 0
 
     try:
         async for event in graph.astream_events(initial_state, config=config, version="v2"):
@@ -153,6 +155,16 @@ async def execute_claims_graph(
                 elif kind == "on_chain_end":
                     if langgraph_node in node_timings:
                         node_timings[langgraph_node]["end"] = time.perf_counter()
+
+            # -- Real LLM token usage (every model call in the graph) --
+            # LangChain normalizes provider usage into AIMessage.usage_metadata;
+            # before this, tokens_used in the audit log was always 0/fake.
+            if kind == "on_chat_model_end":
+                _out = (event.get("data") or {}).get("output")
+                _usage = getattr(_out, "usage_metadata", None)
+                if isinstance(_usage, dict):
+                    tokens_in += _usage.get("input_tokens", 0) or 0
+                    tokens_out += _usage.get("output_tokens", 0) or 0
 
             # -- Stream LLM tokens from user-facing nodes --
             if kind == "on_chat_model_stream":
@@ -189,17 +201,24 @@ async def execute_claims_graph(
         intent = state_values.get("intent")
         graph_tools = state_values.get("tools_called", [])
 
-        # Process consolidated node timings into sub_spans
+        # Process consolidated node timings into sub_spans (+ Prometheus histogram)
+        from backend.services.metrics import NODE_DURATION, LLM_TOKENS
         sub_spans = []
         for name, timing in node_timings.items():
             if timing["end"] is not None:
                 duration_ms = (timing["end"] - timing["start"]) * 1000
-                
+                NODE_DURATION.labels(node=name).observe(duration_ms / 1000.0)
+
                 # If this was the multi_executor, rename it to show the actual tools running
                 if name == "multi_executor" and graph_tools:
                     name = f"tool_execution [{', '.join(graph_tools)}]"
-                    
+
                 sub_spans.append({"name": name, "duration_ms": round(duration_ms, 1)})
+
+        if tokens_in:
+            LLM_TOKENS.labels(direction="input").inc(tokens_in)
+        if tokens_out:
+            LLM_TOKENS.labels(direction="output").inc(tokens_out)
 
         # Prefer the graph's CANONICAL final text (respond_node's AIMessage) over
         # the raw streamed chunks. The canonical text is PII-restored and
@@ -225,6 +244,9 @@ async def execute_claims_graph(
                 "intent": str(intent) if intent else None,
                 "source": "claims_graph",
                 "tools_called": graph_tools,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "tokens_used": tokens_in + tokens_out,
                 "degraded": False,
                 "retrieved_docs": [
                     {"content": d.content, "source_id": d.source_id, "similarity": d.similarity}

@@ -25,6 +25,8 @@ _ALERT_THRESHOLD = 5
 
 def record_persist_failure(kind: str, error: Exception) -> None:
     global _consecutive, _last_error, _last_failure_at
+    from backend.services.metrics import PERSIST_FAILURES
+    PERSIST_FAILURES.labels(kind=kind).inc()
     _failures[kind] = _failures.get(kind, 0) + 1
     _consecutive += 1
     _last_error = f"{kind}: {error}"

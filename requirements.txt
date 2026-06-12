@@ -64,3 +64,5 @@ opentelemetry-exporter-otlp>=1.24.0
 opentelemetry-instrumentation-fastapi>=0.45b0
 opentelemetry-instrumentation-psycopg>=0.45b0
 opentelemetry-instrumentation-redis>=0.45b0
+opentelemetry-instrumentation-celery>=0.45b0
+prometheus-fastapi-instrumentator>=7.0.0

@@ -9,6 +9,7 @@ queue_position / estimated_wait_min fields can never be forgotten on one path.
 import logging
 
 from backend.services.session_store import queue_position
+from backend.services.metrics import ESCALATIONS
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -16,8 +17,14 @@ logger = logging.getLogger("I-Way-Twin")
 _MINUTES_PER_CASE = 3
 
 
-async def send_handoff_started(websocket, session_id: str, reason: str, *, degraded: bool = False):
-    """Emit the handoff_started banner event with the real queue position."""
+async def send_handoff_started(websocket, session_id: str, reason: str, *,
+                               degraded: bool = False, path: str = "graph"):
+    """Emit the handoff_started banner event with the real queue position.
+
+    `path` labels the escalation trigger for metrics:
+    graph | low_confidence | degraded | manual.
+    """
+    ESCALATIONS.labels(path=path).inc()
     pos = queue_position(session_id)
     payload = {
         "type": "handoff_started",

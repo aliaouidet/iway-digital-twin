@@ -243,11 +243,52 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: iway-jaeger
+    # The image's non-root user can't create dirs in the root-owned volume.
+    user: root
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+      # Badger storage: traces survive restarts (default is in-memory — every
+      # restart wiped the whole trace history).
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+    volumes:
+      - jaeger_data:/badger
     ports:
       - "16686:16686" # Web UI
       - "4317:4317" # OTLP gRPC receiver
+    logging: *default-logging
+    restart: unless-stopped
+
+  # --- Prometheus (metrics) ---  URL: http://localhost:5590
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: iway-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "5590:9090"
+    logging: *default-logging
+    restart: unless-stopped
+
+  # --- Grafana (dashboards) ---  URL: http://localhost:3000 (admin / admin)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iway-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
     logging: *default-logging
     restart: unless-stopped
 
@@ -293,4 +334,7 @@ volumes:
   flower_data:
   pgadmin_data:
   redisinsight_data:
+  jaeger_data:
+  prometheus_data:
+  grafana_data:
   hf_cache: # ollama_models:
