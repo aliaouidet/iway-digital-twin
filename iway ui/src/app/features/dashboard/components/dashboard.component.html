@@ -31,6 +31,10 @@
     </div>
   </div>
 
+  <!-- Error State -->
+  <app-error-banner *ngIf="!isLoading() && error()"
+    [message]="error()!" (retry)="loadMetrics()"></app-error-banner>
+
   <!-- Loading State -->
   <div *ngIf="isLoading()" class="grid grid-cols-1 md:grid-cols-6 gap-4">
     <div *ngFor="let _ of [1,2,3,4,5,6]" class="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700/50 p-5 animate-pulse shadow-sm">

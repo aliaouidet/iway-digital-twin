@@ -3,6 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '../../../core/services/admin.service';
+import { ToastService } from '../../../core/services/toast.service';
 import { SystemConfig } from '../../../shared/models';
 
 @Component({
@@ -27,20 +28,26 @@ export class AdminComponent implements OnInit {
 
   private destroyRef = inject(DestroyRef);
 
-  constructor(private adminService: AdminService) {}
+  constructor(
+    private adminService: AdminService,
+    private toast: ToastService,
+  ) {}
 
   ngOnInit(): void {
     this.loadConfig();
   }
 
-  private loadConfig(): void {
+  loadConfig(): void {
     this.isLoading.set(true);
     this.adminService.getConfig().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (data) => {
         this.config.set({ ...data });
         this.isLoading.set(false);
       },
-      error: () => this.isLoading.set(false)
+      error: () => {
+        this.isLoading.set(false);
+        this.toast.show('Failed to load configuration.', 'error');
+      }
     });
   }
 
@@ -56,9 +63,13 @@ export class AdminComponent implements OnInit {
         this.config.set(resp.config);
         this.isSaving.set(false);
         this.showSuccess.set(true);
+        this.toast.show('Configuration saved.', 'success');
         setTimeout(() => this.showSuccess.set(false), 3000);
       },
-      error: () => this.isSaving.set(false)
+      error: () => {
+        this.isSaving.set(false);
+        this.toast.show('Failed to save configuration. Please retry.', 'error');
+      }
     });
   }
 }

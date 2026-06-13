@@ -6,12 +6,13 @@ import { TicketService } from '../../../core/services/ticket.service';
 import { LogsService } from '../../../core/services/logs.service';
 import { WebSocketService } from '../../../core/services/websocket.service';
 import { LogEntry } from '../../../shared/models';
+import { ErrorBannerComponent } from '../../../shared/components/error-banner.component';
 import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-tickets',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ErrorBannerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6">
@@ -46,7 +47,10 @@ import { environment } from '../../../../environments/environment';
         </div>
       </div>
 
-      <div *ngIf="!isLoading()" class="flex gap-6">
+      <app-error-banner *ngIf="!isLoading() && error()"
+        [message]="error()!" (retry)="loadTickets()"></app-error-banner>
+
+      <div *ngIf="!isLoading() && !error()" class="flex gap-6">
         <!-- Ticket List -->
         <div class="flex-1 space-y-3 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
           <div *ngIf="filteredTickets().length === 0" class="text-center py-12 bg-white dark:bg-[#0F172A] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-none">
@@ -54,7 +58,7 @@ import { environment } from '../../../../environments/environment';
             <p class="text-slate-500 text-sm">No tickets matching this filter</p>
           </div>
 
-          <div *ngFor="let ticket of filteredTickets(); let i = index"
+          <div *ngFor="let ticket of filteredTickets(); let i = index; trackBy: trackByTicket"
             (click)="selectTicket(ticket)"
             [class]="selectedTicket() === ticket
               ? 'bg-white dark:bg-[#0F172A] p-5 rounded-2xl border-2 border-indigo-500/50 shadow-md dark:shadow-none cursor-pointer transition-all'
@@ -161,7 +165,10 @@ export class TicketsComponent implements OnInit, OnDestroy {
   selectedTicket = signal<LogEntry | null>(null);
   activeFilter = signal('all');
   isLoading = signal(true);
+  error = signal<string | null>(null);
   jaegerUrl = environment.jaegerUrl;
+
+  trackByTicket = (_: number, t: LogEntry) => t.id;
 
   filterTabs: { label: string; value: string; count: () => number }[] = [];
 
@@ -181,22 +188,7 @@ export class TicketsComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-    this.logsService.getLogs({ page_size: 50 }).subscribe({
-      next: (data) => {
-        // Normalize confidence (0-1 -> 0-100)
-        const items = data.items.map(t => ({
-          ...t,
-          confidence: t.confidence <= 1 && t.confidence > 0 ? Math.round(t.confidence * 100) : t.confidence
-        }));
-        this.tickets.set(items);
-        this.buildFilterTabs();
-        this.isLoading.set(false);
-        if (items.length > 0) {
-          this.selectedTicket.set(items[0]);
-        }
-      },
-      error: () => this.isLoading.set(false)
-    });
+    this.loadTickets();
 
     // Real-time: new pipeline traces
     this.subs.push(
@@ -247,6 +239,32 @@ export class TicketsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
+  }
+
+  loadTickets(): void {
+    this.isLoading.set(true);
+    this.error.set(null);
+    this.subs.push(
+      this.logsService.getLogs({ page_size: 50 }).subscribe({
+        next: (data) => {
+          // Normalize confidence (0-1 -> 0-100)
+          const items = data.items.map(t => ({
+            ...t,
+            confidence: t.confidence <= 1 && t.confidence > 0 ? Math.round(t.confidence * 100) : t.confidence
+          }));
+          this.tickets.set(items);
+          this.buildFilterTabs();
+          this.isLoading.set(false);
+          if (items.length > 0) {
+            this.selectedTicket.set(items[0]);
+          }
+        },
+        error: () => {
+          this.error.set('Failed to load tickets.');
+          this.isLoading.set(false);
+        }
+      })
+    );
   }
 
   private buildFilterTabs(): void {

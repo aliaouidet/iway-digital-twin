@@ -9,11 +9,12 @@ import { MetricsService, OpsMetrics } from '../../../core/services/metrics.servi
 import { WebSocketService } from '../../../core/services/websocket.service';
 import { ThemeService } from '../../../core/services/theme.service';
 import { DashboardMetrics } from '../../../shared/models';
+import { ErrorBannerComponent } from '../../../shared/components/error-banner.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, NgxEchartsDirective],
+  imports: [CommonModule, FormsModule, NgxEchartsDirective, ErrorBannerComponent],
   providers: [provideEchartsCore({ echarts })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard.component.html'
@@ -22,6 +23,7 @@ export class DashboardComponent implements OnInit {
   metrics = signal<DashboardMetrics | null>(null);
   ops = signal<OpsMetrics | null>(null);
   isLoading = signal(true);
+  error = signal<string | null>(null);
 
   // Date picker state
   startDate = signal<string>('');
@@ -140,8 +142,9 @@ export class DashboardComponent implements OnInit {
 
   // --- Data Loading ---
 
-  private loadMetrics(): void {
+  loadMetrics(): void {
     this.isLoading.set(true);
+    this.error.set(null);
     const s = this.startDate() || undefined;
     const e = this.endDate() || undefined;
 
@@ -151,7 +154,10 @@ export class DashboardComponent implements OnInit {
         this.buildCharts(data);
         this.isLoading.set(false);
       },
-      error: () => this.isLoading.set(false)
+      error: () => {
+        this.error.set('Failed to load dashboard metrics.');
+        this.isLoading.set(false);
+      }
     });
 
     // Load hourly traffic (always for today or selected start date)

@@ -1,10 +1,12 @@
-import { Component, OnInit, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, signal, ChangeDetectionStrategy, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { InsightsService } from '../../../core/services/insights.service';
 import { InsightsData, InsightSuggestion } from '../../../shared/models';
+import { ErrorBannerComponent } from '../../../shared/components/error-banner.component';
 import { environment } from '../../../../environments/environment';
 
 interface KnowledgeGap {
@@ -32,7 +34,7 @@ interface CsatStats {
 @Component({
   selector: 'app-insights',
   standalone: true,
-  imports: [CommonModule, NgxEchartsDirective],
+  imports: [CommonModule, NgxEchartsDirective, ErrorBannerComponent],
   providers: [provideEchartsCore({ echarts })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -47,6 +49,10 @@ interface CsatStats {
           Refresh Analysis
         </button>
       </div>
+
+      <!-- Error state -->
+      <app-error-banner *ngIf="!isLoading() && error()"
+        [message]="error()!" (retry)="loadData()"></app-error-banner>
 
       <!-- Summary Cards -->
       <div *ngIf="!isLoading() && data()" class="grid grid-cols-1 md:grid-cols-5 gap-5">
@@ -201,9 +207,12 @@ export class InsightsComponent implements OnInit {
   gapData = signal<GapData | null>(null);
   csatData = signal<CsatStats | null>(null);
   isLoading = signal(true);
+  error = signal<string | null>(null);
 
   confidenceChart: any = {};
   fallbackChart: any = {};
+
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private insightsService: InsightsService,
@@ -218,26 +227,32 @@ export class InsightsComponent implements OnInit {
     this.loadData();
   }
 
-  private loadData(): void {
+  loadData(): void {
     this.isLoading.set(true);
-    this.insightsService.getInsights().subscribe({
-      next: (data) => {
-        this.data.set(data);
-        this.buildCharts(data);
-        this.isLoading.set(false);
-      },
-      error: () => this.isLoading.set(false)
-    });
+    this.error.set(null);
+    this.insightsService.getInsights()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.data.set(data);
+          this.buildCharts(data);
+          this.isLoading.set(false);
+        },
+        error: () => {
+          this.error.set('Failed to load AI insights.');
+          this.isLoading.set(false);
+        }
+      });
 
-    // Load knowledge gaps
-    this.http.get<GapData>(`${environment.apiUrl}/api/v1/knowledge/gaps`).subscribe({
-      next: (data) => this.gapData.set(data),
-    });
+    // Load knowledge gaps (secondary — failure degrades quietly)
+    this.http.get<GapData>(`${environment.apiUrl}/api/v1/knowledge/gaps`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (data) => this.gapData.set(data) });
 
-    // Load CSAT stats
-    this.http.get<CsatStats>(`${environment.apiUrl}/api/v1/feedback/stats`).subscribe({
-      next: (data) => this.csatData.set(data),
-    });
+    // Load CSAT stats (secondary)
+    this.http.get<CsatStats>(`${environment.apiUrl}/api/v1/feedback/stats`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (data) => this.csatData.set(data) });
   }
 
   private buildCharts(data: InsightsData): void {

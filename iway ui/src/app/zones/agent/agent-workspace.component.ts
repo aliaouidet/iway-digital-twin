@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef, HostListener } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef, HostListener, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { trigger, transition, style, animate } from '@angular/animations';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -159,7 +160,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             </div>
           </div>
 
-          <button *ngFor="let item of filteredQueue()" (click)="selectSession(item)" @listAnimation type="button"
+          <button *ngFor="let item of filteredQueue(); trackBy: trackBySession" (click)="selectSession(item)" @listAnimation type="button"
             class="w-full text-left p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:-translate-y-px active:scale-[0.99]"
             [class]="getQueueItemClass(item)">
             <div class="flex items-center justify-between mb-1">
@@ -802,6 +803,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   private eventSub?: Subscription;
   private sessionSocket$: WebSocketSubject<any> | null = null;
   private currentAgentMatricule = '';
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private authService: AuthService,
@@ -866,10 +868,12 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   private loadQueue(): void {
     this.queueLoading.set(true);
-    this.http.get<QueueItem[]>(`${environment.apiUrl}/api/v1/sessions/active`).subscribe({
-      next: (items) => { this.wsService.setInitialQueue(items); this.queueLoading.set(false); },
-      error: (err) => { console.error('Failed to load queue:', err); this.queueLoading.set(false); }
-    });
+    this.http.get<QueueItem[]>(`${environment.apiUrl}/api/v1/sessions/active`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (items) => { this.wsService.setInitialQueue(items); this.queueLoading.set(false); },
+        error: (err) => { console.error('Failed to load queue:', err); this.queueLoading.set(false); }
+      });
   }
 
   filteredQueue(): QueueItem[] {
@@ -919,6 +923,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
   selectSession(item: QueueItem): void {
     this.activeSession.set(item);
+    this.chatHistory.set([]);   // clear synchronously — don't flash the previous session
     this.markSeen(item.id);
     // "Taken over" (chat input shown) only applies to THIS agent's sessions —
     // another agent's active session is view-only here.
@@ -953,12 +958,17 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   private loadHistory(sessionId: string): void {
-    this.http.get<any>(`${environment.apiUrl}/api/v1/sessions/${sessionId}/history`).subscribe({
-      next: (data) => {
-        this.chatHistory.set(data.history || []);
-        setTimeout(() => this.scrollChat(), 100);
-      }
-    });
+    this.http.get<any>(`${environment.apiUrl}/api/v1/sessions/${sessionId}/history`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          // Ignore a slow response for a session the agent has since left
+          // (rapid session switching would otherwise overwrite the new history).
+          if (this.activeSession()?.id !== sessionId) return;
+          this.chatHistory.set(data.history || []);
+          setTimeout(() => this.scrollChat(), 100);
+        }
+      });
   }
 
   // ─── Context drawer (Briefing / Dossier tabs) ───
@@ -991,15 +1001,23 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   private loadBriefing(): void {
     const session = this.activeSession();
     if (!session) return;
+    const reqId = session.id;
     this.briefingLoading.set(true);
     this.briefingError.set(false);
-    this.http.get<Briefing>(`${environment.apiUrl}/api/v1/sessions/${session.id}/briefing`).subscribe({
-      next: (data) => {
-        this.briefing.set(data);
-        this.briefingLoading.set(false);
-      },
-      error: () => { this.briefingLoading.set(false); this.briefingError.set(true); }
-    });
+    this.http.get<Briefing>(`${environment.apiUrl}/api/v1/sessions/${reqId}/briefing`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          if (this.activeSession()?.id !== reqId) return;
+          this.briefing.set(data);
+          this.briefingLoading.set(false);
+        },
+        error: () => {
+          if (this.activeSession()?.id !== reqId) return;
+          this.briefingLoading.set(false);
+          this.briefingError.set(true);
+        }
+      });
   }
 
   // ─── Approve / Clarify ───
@@ -1010,7 +1028,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
     this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/approve`, {
       action: 'approve'
-    }).subscribe({
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: () => {
         this.loadHistory(session.id);
         this.loadQueue();
@@ -1029,7 +1049,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/approve`, {
       action: 'clarify',
       clarification: this.clarifyText.trim()
-    }).subscribe({
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: () => {
         this.loadHistory(session.id);
         this.loadQueue();
@@ -1049,7 +1071,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     if (!session) return;
     this.isTakingOver.set(true);
 
-    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/takeover`, {}).subscribe({
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/takeover`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: () => {
         this.hasTakenOver.set(true);
         this.isTakingOver.set(false);
@@ -1140,7 +1164,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.isSuggesting.set(true);
     this.lastSuggestionGrounded.set(null);
 
-    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/suggest`, {}).subscribe({
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/suggest`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (res) => {
         this.isSuggesting.set(false);
         const text = (res?.suggestion || '').trim();
@@ -1175,16 +1201,23 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   private loadClientContext(): void {
     const session = this.activeSession();
     if (!session) return;
+    const reqId = session.id;
     this.clientLoading.set(true);
     this.clientError.set(false);
-    this.http.get<any>(`${environment.apiUrl}/api/v1/sessions/${session.id}/client-context`).subscribe({
-      next: (data) => { this.clientContext.set(data); this.clientLoading.set(false); },
-      error: () => {
-        this.clientLoading.set(false);
-        this.clientError.set(true);
-        this.toastService.show('Dossier client indisponible', 'error');
-      },
-    });
+    this.http.get<any>(`${environment.apiUrl}/api/v1/sessions/${reqId}/client-context`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          if (this.activeSession()?.id !== reqId) return;
+          this.clientContext.set(data); this.clientLoading.set(false);
+        },
+        error: () => {
+          if (this.activeSession()?.id !== reqId) return;
+          this.clientLoading.set(false);
+          this.clientError.set(true);
+          this.toastService.show('Dossier client indisponible', 'error');
+        },
+      });
   }
 
   /** Retry button for the drawer error states. */
@@ -1281,6 +1314,8 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     return this.unseenIds().has(id);
   }
 
+  trackBySession = (_: number, item: QueueItem) => item.id;
+
   resolveSession(): void {
     const session = this.activeSession();
     if (!session) return;
@@ -1295,7 +1330,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
     const sessionId = session.id;
 
-    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${sessionId}/resolve`, body).subscribe({
+    this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${sessionId}/resolve`, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (res) => {
         this.showResolveDialog.set(false);
         this.loadQueue();
@@ -1318,7 +1355,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
 
     this.http.post<any>(`${environment.apiUrl}/api/v1/knowledge/extract-knowledge`, {
       session_id: sessionId
-    }).subscribe({
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (res) => {
         // Add 'selected' flag for checkboxes (pre-check non-personal)
         const pairs = (res.pairs || []).map((p: any) => ({
@@ -1361,7 +1400,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.http.post<any>(`${environment.apiUrl}/api/v1/knowledge/save-knowledge`, {
       session_id: session.id,
       pairs: selectedPairs
-    }).subscribe({
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (res) => {
         this.savingKnowledge.set(false);
         this.showKnowledgeModal.set(false);

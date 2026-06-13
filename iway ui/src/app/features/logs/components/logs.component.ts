@@ -1,13 +1,15 @@
-import { Component, OnInit, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, ChangeDetectionStrategy, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { LogsService } from '../../../core/services/logs.service';
 import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
+import { ErrorBannerComponent } from '../../../shared/components/error-banner.component';
 
 @Component({
   selector: 'app-logs',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ErrorBannerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6">
@@ -73,7 +75,10 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
       </div>
 
       <!-- Logs Table -->
-      <div *ngIf="!isLoading()" class="bg-white dark:bg-[#0F172A] rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm dark:shadow-none">
+      <app-error-banner *ngIf="!isLoading() && error()"
+        [message]="error()!" (retry)="loadLogs()"></app-error-banner>
+
+      <div *ngIf="!isLoading() && !error()" class="bg-white dark:bg-[#0F172A] rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm dark:shadow-none">
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
@@ -89,7 +94,7 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
               </tr>
             </thead>
             <tbody>
-              <ng-container *ngFor="let log of logs(); let i = index">
+              <ng-container *ngFor="let log of logs(); let i = index; trackBy: trackByLog">
               <tr (click)="toggleExpand(i)"
                   class="border-b border-slate-200 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors cursor-pointer group"
                   [ngClass]="{'bg-slate-50 dark:bg-slate-800/50': expandedRow() === i}">
@@ -235,9 +240,10 @@ import { LogEntry, LogFilter, PaginatedLogs } from '../../../shared/models';
     </div>
   `
 })
-export class LogsComponent implements OnInit {
+export class LogsComponent implements OnInit, OnDestroy {
   logs = signal<LogEntry[]>([]);
   isLoading = signal(true);
+  error = signal<string | null>(null);
   currentPage = signal(1);
   totalPages = signal(1);
   totalLogs = signal(0);
@@ -255,12 +261,19 @@ export class LogsComponent implements OnInit {
   minSimilarity = 0;
 
   private filterTimer: any;
+  private destroyRef = inject(DestroyRef);
 
   constructor(private logsService: LogsService) {}
 
   ngOnInit(): void {
     this.loadLogs();
   }
+
+  ngOnDestroy(): void {
+    clearTimeout(this.filterTimer);
+  }
+
+  trackByLog = (_: number, log: LogEntry) => log.otel_trace_id ?? log.timestamp;
 
   toggleExpand(index: number): void {
     if (this.expandedRow() === index) {
@@ -388,8 +401,9 @@ export class LogsComponent implements OnInit {
     this.loadLogs();
   }
 
-  private loadLogs(): void {
+  loadLogs(): void {
     this.isLoading.set(true);
+    this.error.set(null);
     const filter: LogFilter = {
       page: this.currentPage(),
       page_size: 20,
@@ -398,15 +412,20 @@ export class LogsComponent implements OnInit {
       min_similarity: this.minSimilarity > 0 ? this.minSimilarity : undefined,
     };
 
-    this.logsService.getLogs(filter).subscribe({
-      next: (data) => {
-        this.logs.set(data.items);
-        this.totalPages.set(data.total_pages);
-        this.totalLogs.set(data.total);
-        this.isLoading.set(false);
-      },
-      error: () => this.isLoading.set(false)
-    });
+    this.logsService.getLogs(filter)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.logs.set(data.items);
+          this.totalPages.set(data.total_pages);
+          this.totalLogs.set(data.total);
+          this.isLoading.set(false);
+        },
+        error: () => {
+          this.error.set('Failed to load logs.');
+          this.isLoading.set(false);
+        }
+      });
   }
 
   formatTime(ts: string): string {

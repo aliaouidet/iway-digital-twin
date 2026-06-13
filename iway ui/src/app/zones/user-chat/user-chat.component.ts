@@ -652,10 +652,12 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   // ─── Multi-Chat ───
 
   loadChatThreads(): void {
-    this.http.get<ChatThread[]>(`${environment.apiUrl}/api/v1/sessions/user-chats`).subscribe({
-      next: (chats) => this.chatThreads.set(chats),
-      error: () => { }
-    });
+    this.http.get<ChatThread[]>(`${environment.apiUrl}/api/v1/sessions/user-chats`)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (chats) => this.chatThreads.set(chats),
+        error: () => { }
+      });
   }
 
   /** Filter: hide empty sessions older than 5 minutes */
@@ -706,7 +708,9 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
    * If no active chats exist, just show the welcome screen.
    */
   resumeLastActiveChat(): void {
-    this.http.get<ChatThread[]>(`${environment.apiUrl}/api/v1/sessions/user-chats`).subscribe({
+    this.http.get<ChatThread[]>(`${environment.apiUrl}/api/v1/sessions/user-chats`)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
       next: (chats) => {
         this.chatThreads.set(chats);
         // Find the most recent non-resolved chat
@@ -841,8 +845,28 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       takeUntil(this.destroy$)
     ).subscribe({
       next: (msg) => this.handleWsMessage(msg),
-      error: (err) => { console.error('[UserChat WS] Stream error:', err); this.isConnected.set(false); },
-      complete: () => this.isConnected.set(false),
+      error: (err) => {
+        console.error('[UserChat WS] Stream error:', err);
+        this.isConnected.set(false);
+        this.discardInterruptedStream();
+      },
+      complete: () => {
+        this.isConnected.set(false);
+        this.discardInterruptedStream();
+      },
+    });
+  }
+
+  /** If the socket drops mid-stream, drop the half-streamed buffer + the dangling
+   *  streaming bubble so the next response doesn't append to stale tokens. */
+  private discardInterruptedStream(): void {
+    if (!this.streamingContent && !this.isThinking()) return;
+    this.streamingContent = '';
+    this.isThinking.set(false);
+    this.messages.update(msgs => {
+      const last = msgs[msgs.length - 1];
+      if (last?.role === 'assistant' && last.isStreaming) return msgs.slice(0, -1);
+      return msgs;
     });
   }
 
@@ -1009,7 +1033,9 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.messages.update(m => [...m, { role: 'user', content, timestamp: new Date().toISOString() }]);
       this.isThinking.set(true);
       this.thinkingStatus.set('Création de la session...');
-      this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {}).subscribe({
+      this.http.post<{ session_id: string }>(`${environment.apiUrl}/api/v1/sessions/create`, {})
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
         next: (res) => {
           this.sessionId = res.session_id;
           this.pendingMessages.push(content);  // Queue the message for after WS connects
@@ -1159,12 +1185,14 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.http.post<any>(`${environment.apiUrl}/api/v1/sessions/${this.sessionId}/feedback`, {
       rating,
       comment: this.feedbackComment,
-    }).subscribe({
-      next: () => {
-        this.feedbackGiven.set(true);
-        this.showFeedbackComment.set(false);
-      }
-    });
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.feedbackGiven.set(true);
+          this.showFeedbackComment.set(false);
+        }
+      });
   }
 
   logout(): void {
