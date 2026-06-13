@@ -150,16 +150,34 @@ def test_activation_rejects_short_password(monkeypatch):
     assert e.value.status_code == 400
 
 
-def test_activation_soap_down_is_503(monkeypatch):
+def test_activation_transport_error_is_503(monkeypatch):
+    """ERP unreachable (transport/connection error) → 503, not 401."""
     monkeypatch.setattr(auth.settings, "IWAY_USE_REAL_API", True, raising=False)
 
     async def _boom(*a, **k):
-        raise RuntimeError("server unreachable (off-LAN)")
+        raise ConnectionError("server unreachable (off-LAN)")
 
     monkeypatch.setattr(soap, "_call", _boom)
     with pytest.raises(HTTPException) as e:
         _activate()
     assert e.value.status_code == 503
+
+
+def test_activation_soap_fault_is_generic_401(monkeypatch):
+    """A SOAP Fault (wrong matricule/police → record-not-found / invalid police)
+    is the ERP REJECTING the identity — must surface as the generic 401, never a
+    misleading 503 'service indisponible'."""
+    from zeep.exceptions import Fault
+    monkeypatch.setattr(auth.settings, "IWAY_USE_REAL_API", True, raising=False)
+
+    async def _fault(*a, **k):
+        raise Fault("DataNotFoundException: police invalide")
+
+    monkeypatch.setattr(soap, "_call", _fault)
+    with pytest.raises(HTTPException) as e:
+        _activate(num_police="0000000000000")
+    assert e.value.status_code == 401
+    assert e.value.detail == "Informations non reconnues."
 
 
 def test_activation_rate_limited_after_5_attempts(monkeypatch):

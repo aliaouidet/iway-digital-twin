@@ -427,6 +427,18 @@ def _as_list(result: Any) -> list:
     return [result]
 
 
+def is_data_fault(exc: BaseException) -> bool:
+    """True for a SOAP Fault — the ERP RESPONDED and rejected the request (record
+    not found / invalid police), as opposed to a transport/connection error or an
+    open circuit (generic Exception from retry_with_backoff). Lets auth activation
+    distinguish 401 'not recognized' from 503 'service indisponible'."""
+    try:
+        from zeep.exceptions import Fault
+    except Exception:  # pragma: no cover — zeep optional at import time
+        return False
+    return isinstance(exc, Fault)
+
+
 def _clean(value: Any) -> Optional[str]:
     """Strip a string field; empty/whitespace-only values become None."""
     if value is None:

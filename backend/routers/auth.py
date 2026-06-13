@@ -370,14 +370,24 @@ async def activate_account(data: ActivateInput):
             detail="Trop de tentatives d'activation. Réessayez dans 15 minutes.",
         )
 
+    # Generic message on EVERY mismatch — never reveal which field failed or
+    # whether the matricule/police pair exists (enumeration defense).
+    _generic_401 = HTTPException(status_code=401, detail="Informations non reconnues.")
+
     # ── Identity check against the ERP ──
+    from backend.services import iway_soap_client as soap
     try:
-        from backend.services import iway_soap_client as soap
         raw = await soap._call(
             "contrat", "getContratAdherentByMatricule",
+            _retries=1,  # a wrong-creds fault must not hit the ERP 3× nor churn the circuit
             matricule=data.matricule, numPolice=data.num_police,
         )
     except Exception as e:
+        # A SOAP fault = the ERP rejected the matricule/police (record not found /
+        # invalid police) → treat as not recognized, NOT as an outage.
+        if soap.is_data_fault(e):
+            logger.info(f"Activation identity not recognized for {data.matricule}: {e}")
+            raise _generic_401
         logger.warning(f"⚠️ Activation ERP check unavailable for {data.matricule}: {e}")
         raise HTTPException(
             status_code=503,
@@ -385,9 +395,6 @@ async def activate_account(data: ActivateInput):
         )
 
     identity = soap._map_identity(raw) if raw is not None else None
-    # Generic message on EVERY mismatch — never reveal which field failed or
-    # whether the matricule/police pair exists (enumeration defense).
-    _generic_401 = HTTPException(status_code=401, detail="Informations non reconnues.")
     if not identity or not (identity.get("date_naissance") or identity.get("cin")):
         raise _generic_401
 
@@ -453,14 +460,18 @@ async def activate_prestataire(data: ActivatePsInput):
         )
 
     _generic_401 = HTTPException(status_code=401, detail="Informations non reconnues.")
+    from backend.services import iway_soap_client as soap
     try:
-        from backend.services import iway_soap_client as soap
         resolved = await soap.get_contrat_ps_by_matricule_fiscal(data.matricule_fiscal)
         contrat_ps = (
             await soap.get_contrat_ps_by_id_tiers(resolved["id_tiers"])
             if resolved and resolved.get("id_tiers") else None
         )
     except Exception as e:
+        # A SOAP fault = matricule fiscal / idTiers not found → not recognized, not an outage.
+        if soap.is_data_fault(e):
+            logger.info(f"PS activation identity not recognized for {data.matricule_fiscal}: {e}")
+            raise _generic_401
         logger.warning(f"⚠️ PS activation ERP check unavailable for {data.matricule_fiscal}: {e}")
         raise HTTPException(
             status_code=503,
