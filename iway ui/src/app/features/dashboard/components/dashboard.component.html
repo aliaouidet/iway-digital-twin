@@ -2,7 +2,9 @@
   <div class="flex items-center justify-between flex-wrap gap-4">
     <div>
       <h1 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">Support Overview</h1>
-      <p class="text-slate-500 mt-1 text-sm">Real-time metrics for AI RAG support system</p>
+      <p class="text-slate-500 mt-1 text-sm">Real-time metrics for AI RAG support system
+        <span *ngIf="lastUpdated() as t" class="text-slate-400 dark:text-slate-600">· updated {{ t | date:'HH:mm:ss' }}</span>
+      </p>
     </div>
 
     <!-- Date Filter -->

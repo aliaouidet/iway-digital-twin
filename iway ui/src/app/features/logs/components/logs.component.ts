@@ -262,15 +262,36 @@ export class LogsComponent implements OnInit, OnDestroy {
 
   private filterTimer: any;
   private destroyRef = inject(DestroyRef);
+  private static readonly FILTER_KEY = 'iway_logs_filters';
 
   constructor(private logsService: LogsService) {}
 
   ngOnInit(): void {
+    this.restoreFilters();
     this.loadLogs();
   }
 
   ngOnDestroy(): void {
     clearTimeout(this.filterTimer);
+  }
+
+  private restoreFilters(): void {
+    try {
+      const raw = localStorage.getItem(LogsComponent.FILTER_KEY);
+      if (!raw) return;
+      const f = JSON.parse(raw);
+      this.searchQuery = f.search ?? '';
+      this.selectedOutcome = f.outcome ?? '';
+      this.minSimilarity = f.minSimilarity ?? 0;
+    } catch { /* ignore corrupt prefs */ }
+  }
+
+  private persistFilters(): void {
+    try {
+      localStorage.setItem(LogsComponent.FILTER_KEY, JSON.stringify({
+        search: this.searchQuery, outcome: this.selectedOutcome, minSimilarity: this.minSimilarity,
+      }));
+    } catch { /* storage full / disabled — non-fatal */ }
   }
 
   trackByLog = (_: number, log: LogEntry) => log.otel_trace_id ?? log.timestamp;
@@ -390,6 +411,7 @@ export class LogsComponent implements OnInit, OnDestroy {
   onFilterChange(): void {
     clearTimeout(this.filterTimer);
     this.filterTimer = setTimeout(() => {
+      this.persistFilters();
       this.currentPage.set(1);
       this.loadLogs();
     }, 400);

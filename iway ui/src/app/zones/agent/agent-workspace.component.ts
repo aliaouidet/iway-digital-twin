@@ -902,7 +902,19 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       );
     }
 
-    return items;
+    // Priority sort: waiting clients first (oldest wait at the top), then active,
+    // then everything else by recency — so the most urgent case is always on top.
+    const rank = (s: string) => (s === 'handoff_pending' ? 0 : s === 'agent_connected' ? 1 : 2);
+    return [...items].sort((a, b) => {
+      const r = rank(a.status) - rank(b.status);
+      if (r !== 0) return r;
+      if (a.status === 'handoff_pending') {
+        // oldest first (longest wait = most urgent)
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      // most recent activity first
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
   }
 
   getFilterCount(filter: QueueFilter): number {

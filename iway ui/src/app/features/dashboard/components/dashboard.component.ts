@@ -24,6 +24,7 @@ export class DashboardComponent implements OnInit {
   ops = signal<OpsMetrics | null>(null);
   isLoading = signal(true);
   error = signal<string | null>(null);
+  lastUpdated = signal<Date | null>(null);
 
   // Date picker state
   startDate = signal<string>('');
@@ -152,6 +153,7 @@ export class DashboardComponent implements OnInit {
       next: (data) => {
         this.metrics.set(data);
         this.buildCharts(data);
+        this.lastUpdated.set(new Date());
         this.isLoading.set(false);
       },
       error: () => {

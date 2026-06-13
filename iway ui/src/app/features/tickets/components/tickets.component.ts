@@ -26,7 +26,7 @@ import { environment } from '../../../../environments/environment';
       <!-- Filter Tabs -->
       <div class="flex gap-2">
         <button *ngFor="let tab of filterTabs"
-          (click)="activeFilter.set(tab.value)"
+          (click)="selectFilter(tab.value)"
           [class]="activeFilter() === tab.value
             ? 'px-4 py-2 bg-indigo-600 rounded-xl text-xs font-semibold text-white transition-all cursor-pointer shadow-sm'
             : 'px-4 py-2 bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600 transition-all cursor-pointer'">
@@ -170,6 +170,11 @@ export class TicketsComponent implements OnInit, OnDestroy {
 
   trackByTicket = (_: number, t: LogEntry) => t.id;
 
+  selectFilter(value: string): void {
+    this.activeFilter.set(value);
+    try { localStorage.setItem('iway_tickets_filter', value); } catch { /* non-fatal */ }
+  }
+
   filterTabs: { label: string; value: string; count: () => number }[] = [];
 
   filteredTickets = computed(() => {
@@ -188,6 +193,11 @@ export class TicketsComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    try {
+      const saved = localStorage.getItem('iway_tickets_filter');
+      if (saved) this.activeFilter.set(saved);
+    } catch { /* ignore */ }
+
     this.loadTickets();
 
     // Real-time: new pipeline traces

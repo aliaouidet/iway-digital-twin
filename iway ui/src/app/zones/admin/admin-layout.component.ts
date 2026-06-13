@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterOutlet, RouterModule, Router } from '@angular/router';
+import { RouterOutlet, RouterModule, Router, NavigationStart, NavigationEnd, NavigationCancel, NavigationError } from '@angular/router';
 import { trigger, state, style, transition, animate } from '@angular/animations';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
@@ -126,12 +126,20 @@ import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
 
       <!-- Main Content -->
       <main class="flex-1 flex flex-col overflow-hidden relative w-full h-full">
+        <!-- Route-change progress bar -->
+        <div *ngIf="isNavigating()" class="absolute top-0 left-0 right-0 h-0.5 z-30 overflow-hidden">
+          <div class="h-full w-1/3 bg-gradient-to-r from-transparent via-indigo-500 to-transparent animate-[nav-progress_1s_ease-in-out_infinite]"></div>
+        </div>
         <header class="h-14 flex items-center px-4 lg:px-8 justify-between sticky top-0 z-20 border-b backdrop-blur-md flex-shrink-0 bg-white/80 border-slate-200 dark:bg-[#0F172A]/80 dark:border-slate-800">
-          <div class="flex items-center gap-3">
-            <button (click)="toggleSidebar()" class="lg:hidden p-2 -ml-2 rounded-lg transition-colors cursor-pointer hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300" aria-label="Open Menu">
-              <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          <div class="flex items-center gap-3 min-w-0">
+            <button (click)="toggleSidebar()" class="lg:hidden p-2 -ml-2 rounded-lg transition-colors cursor-pointer hover:bg-slate-100 text-slate-700 dark:hover:bg-slate-800 dark:text-slate-300" [attr.aria-label]="isSidebarOpen() ? 'Close menu' : 'Open menu'">
+              <svg *ngIf="!isSidebarOpen()" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+              <svg *ngIf="isSidebarOpen()" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
-            <h2 class="text-base font-semibold truncate text-slate-800 dark:text-slate-200" style="font-family: 'Figtree', sans-serif;">Support Operations Center</h2>
+            <div class="min-w-0 leading-tight">
+              <h2 class="text-base font-semibold truncate text-slate-800 dark:text-slate-200" style="font-family: 'Figtree', sans-serif;">{{ pageTitle() }}</h2>
+              <p class="hidden sm:block text-[11px] text-slate-400 dark:text-slate-500 truncate">Support Operations Center</p>
+            </div>
           </div>
           <div class="flex items-center space-x-3 lg:space-x-5">
             <div class="flex items-center gap-2">
@@ -155,14 +163,31 @@ import { IwayLogoComponent } from '../../shared/components/iway-logo.component';
     :host-context(.dark) ::ng-deep .active-link {
       background: rgba(99, 102, 241, 0.1);
     }
+    @keyframes nav-progress {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
   `]
 })
 export class AdminLayoutComponent implements OnInit, OnDestroy {
   private authSub?: Subscription;
+  private routerSub?: Subscription;
   userName = signal('');
   userRole = signal('');
   userInitials = signal('');
-  
+
+  // Header reflects the current page; a thin bar shows during lazy-route loads.
+  pageTitle = signal('Dashboard');
+  isNavigating = signal(false);
+
+  private readonly titleMap: Record<string, string> = {
+    dashboard: 'Dashboard',
+    tickets: 'Tickets & Alerts',
+    logs: 'Logs & Audit',
+    insights: 'AI Insights',
+    config: 'System Config',
+  };
+
   isSidebarOpen = signal(false);
   isMonitoringDropdownOpen = signal(true);
   isSystemDropdownOpen = signal(false);
@@ -173,6 +198,11 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
     private wsService: WebSocketService,
     private router: Router
   ) { }
+
+  private syncPageTitle(url: string): void {
+    const seg = url.split('?')[0].split('/').filter(Boolean).pop() || 'dashboard';
+    this.pageTitle.set(this.titleMap[seg] || 'Dashboard');
+  }
 
 
   toggleTheme = () => this.themeService.toggleTheme();
@@ -207,6 +237,13 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
         this.wsService.disconnect();
       }
     });
+
+    this.syncPageTitle(this.router.url);
+    this.routerSub = this.router.events.subscribe(ev => {
+      if (ev instanceof NavigationStart) this.isNavigating.set(true);
+      else if (ev instanceof NavigationEnd) { this.isNavigating.set(false); this.syncPageTitle(ev.urlAfterRedirects); }
+      else if (ev instanceof NavigationCancel || ev instanceof NavigationError) this.isNavigating.set(false);
+    });
   }
 
   logout(): void {
@@ -216,6 +253,7 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.authSub?.unsubscribe();
+    this.routerSub?.unsubscribe();
     this.wsService.disconnect();
   }
 }
