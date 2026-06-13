@@ -456,6 +456,23 @@ interface ChatThread {
           </div>
 
           <!-- Thinking indicator -->
+          <!-- Agent is typing (during a human handoff) -->
+          <div *ngIf="agentTyping() && !isThinking()" class="flex justify-start gap-2.5">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-amber-50 dark:bg-amber-500/10">
+              <svg class="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+            </div>
+            <div class="px-4 py-3 rounded-2xl rounded-bl-md bg-white border border-slate-200 shadow-sm dark:bg-[#0F172A] dark:border-slate-800">
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-medium text-amber-600 dark:text-amber-400">{{agentName() || 'L\\'agent'}} écrit</span>
+                <span class="flex gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full animate-bounce bg-amber-400" style="animation-delay: 0ms"></span>
+                  <span class="w-1.5 h-1.5 rounded-full animate-bounce bg-amber-400" style="animation-delay: 150ms"></span>
+                  <span class="w-1.5 h-1.5 rounded-full animate-bounce bg-amber-400" style="animation-delay: 300ms"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div *ngIf="isThinking()" class="flex justify-start gap-2.5">
             <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-indigo-50 dark:bg-indigo-500/10">
               <svg class="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
@@ -524,13 +541,20 @@ interface ChatThread {
 
         <!-- Input -->
         <div *ngIf="!isSessionResolved()" class="px-4 py-4 border-t flex-shrink-0 transition-colors bg-white border-slate-200 dark:bg-[#0F172A]/60 dark:border-slate-800">
+          <!-- Contextual follow-up chips (derived from the last AI answer) -->
+          <div *ngIf="suggestedChips().length && !isThinking()" class="max-w-3xl mx-auto flex flex-wrap gap-2 mb-2.5">
+            <button *ngFor="let chip of suggestedChips()" (click)="sendChip(chip)" type="button"
+              class="px-3 py-1.5 rounded-full text-[11px] font-medium cursor-pointer transition-colors border bg-slate-50 border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/50 dark:bg-slate-800/40 dark:border-slate-700 dark:text-slate-300 dark:hover:border-indigo-500/40 dark:hover:text-indigo-300">
+              {{chip}}
+            </button>
+          </div>
           <form (ngSubmit)="sendMessage()" class="max-w-3xl mx-auto">
             <div class="flex items-end gap-3">
               <div class="flex-1 relative">
                 <textarea #msgInput [(ngModel)]="newMessage" name="msg" rows="1"
                   placeholder="Écrivez votre message..."
                   class="w-full px-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500 max-h-40 overflow-y-auto"
-                  (input)="autoGrow($event)"
+                  (input)="autoGrow($event); onUserTyping()"
                   (keydown.enter)="$any($event).shiftKey ? null : onEnter($event)"></textarea>
               </div>
               <button type="submit" [disabled]="!newMessage.trim()" aria-label="Envoyer le message"
@@ -582,6 +606,11 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   private lastScrollHeight = 0;
   isAtBottom = signal(true);
   hasNewBelow = signal(false);
+  // Typing indicators (agent ↔ client, relayed by chat_service)
+  agentTyping = signal(false);
+  private agentTypingTimer: any;
+  private typingSentAt = 0;
+  private typingStopTimer: any;
   private destroy$ = new Subject<void>();
   private pingSubscription: Subscription | null = null;
   private pendingMessages: string[] = [];  // Messages waiting for the WS to (re)connect
@@ -684,6 +713,50 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.isAtBottom.set(true);
     this.hasNewBelow.set(false);
     this.scrollToBottom();
+  }
+
+  /** Context-aware follow-up chips derived from the last AI answer's records. */
+  suggestedChips(): string[] {
+    const msgs = this.messages();
+    const last = msgs[msgs.length - 1];
+    if (!last || last.role !== 'assistant' || last.isStreaming) return [];
+    const r: any = last.records || {};
+    const chips: string[] = [];
+    if (r.dossiers?.length) chips.push('Mes plafonds', 'Mes réclamations');
+    else if (r.prestataires?.length) chips.push('Une autre spécialité', 'Dans une autre ville');
+    else if (r.factures?.length) chips.push('Mes remboursements');
+    else if (r.plafonds?.length) chips.push('Mes dossiers');
+    else if (r.reclamations?.length) chips.push('Déposer une réclamation');
+    else if (r.contrat) chips.push('Mes bénéficiaires', 'Mes remboursements');
+    if (chips.length < 3 && !this.isHandoffPending()) chips.push('Parler à un agent');
+    return chips.slice(0, 3);
+  }
+
+  sendChip(text: string): void {
+    this.newMessage = text;
+    this.sendMessage();
+  }
+
+  /** Emit a debounced typing signal to the agent during a handoff. */
+  onUserTyping(): void {
+    if (!this.socket$ || this.socket$.closed) return;
+    const now = Date.now();
+    // Throttle the "started typing" frame to at most once every 3s.
+    if (now - this.typingSentAt > 3000) {
+      this.socket$.next({ type: 'typing', is_typing: true });
+      this.typingSentAt = now;
+    }
+    clearTimeout(this.typingStopTimer);
+    this.typingStopTimer = setTimeout(() => this.stopTyping(), 3000);
+  }
+
+  /** Tell the agent we stopped typing (on idle or send). */
+  private stopTyping(): void {
+    clearTimeout(this.typingStopTimer);
+    this.typingSentAt = 0;
+    if (this.socket$ && !this.socket$.closed) {
+      this.socket$.next({ type: 'typing', is_typing: false });
+    }
   }
 
   // ─── Multi-Chat ───
@@ -942,6 +1015,17 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.isConnected.set(true);
         this.flushPendingMessages();
         break;
+      case 'typing':
+        // The human agent is composing — show an indicator (auto-clears in case
+        // the matching is_typing:false frame is missed).
+        if (msg.from === 'agent') {
+          this.agentTyping.set(!!msg.is_typing);
+          clearTimeout(this.agentTypingTimer);
+          if (msg.is_typing) {
+            this.agentTypingTimer = setTimeout(() => this.agentTyping.set(false), 6000);
+          }
+        }
+        break;
       case 'history':
         if (msg.messages?.length) {
           this.messages.set(msg.messages.map((m: any) => ({
@@ -1064,6 +1148,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     const content = this.newMessage.trim();
     this.newMessage = '';
     this.resetInputHeight();
+    this.stopTyping();
 
     // Lazy session creation: if no session exists yet, create one first
     if (!this.sessionId) {
@@ -1260,6 +1345,8 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.destroy$.next();
     this.destroy$.complete();
     this.stopPing();
+    clearTimeout(this.agentTypingTimer);
+    clearTimeout(this.typingStopTimer);
     this.socket$?.complete();
   }
 }

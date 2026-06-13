@@ -102,6 +102,14 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
             <button (click)="toggleSidebar()" type="button" aria-label="Fermer la file d'attente" class="md:hidden w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer mr-1 hover:bg-slate-100 text-slate-500 dark:hover:bg-slate-800 dark:text-slate-400">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
+            <button (click)="toggleAlerts()" type="button" [attr.aria-label]="alertsEnabled() ? 'Désactiver les alertes' : 'Activer les alertes'" [title]="alertsEnabled() ? 'Alertes activées' : 'Alertes désactivées'"
+              class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+              [class]="alertsEnabled() ? 'text-amber-500 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'">
+              <!-- Bell (on) -->
+              <svg *ngIf="alertsEnabled()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+              <!-- Bell with slash (off) -->
+              <svg *ngIf="!alertsEnabled()" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.143 17.082a24.248 24.248 0 003.844.148m-3.844-.148a23.856 23.856 0 01-5.455-1.31 8.964 8.964 0 002.3-5.542m3.155 6.852a3 3 0 005.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 003.536-1.003A8.967 8.967 0 0118 9.75V9A6 6 0 006.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"/></svg>
+            </button>
             <button (click)="toggleTheme()" type="button" aria-label="Changer de thème" class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer hover:bg-slate-100 text-slate-400 dark:hover:bg-slate-800 dark:text-slate-500">
               <!-- Sun icon for dark mode (to switch to light) -->
               <svg class="w-3.5 h-3.5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
@@ -676,6 +684,16 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 </div>
               </div>
             </div>
+
+            <!-- Client is typing -->
+            <div *ngIf="clientTyping()" class="flex items-center gap-2 mt-1 text-[11px] text-indigo-500 dark:text-indigo-400">
+              <span class="flex gap-1">
+                <span class="w-1.5 h-1.5 rounded-full animate-bounce bg-indigo-400" style="animation-delay: 0ms"></span>
+                <span class="w-1.5 h-1.5 rounded-full animate-bounce bg-indigo-400" style="animation-delay: 150ms"></span>
+                <span class="w-1.5 h-1.5 rounded-full animate-bounce bg-indigo-400" style="animation-delay: 300ms"></span>
+              </span>
+              Le client écrit…
+            </div>
           </div>
 
           <!-- Agent Input (after takeover) -->
@@ -707,7 +725,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
 
             <form (ngSubmit)="sendAgentMessage()" class="flex items-end gap-3">
               <textarea #agentInput [(ngModel)]="agentMessage" name="agentMsg" rows="1"
-                (keydown)="onAgentKeydown($event)" (input)="autoGrowAgent($event)"
+                (keydown)="onAgentKeydown($event)" (input)="autoGrowAgent($event); onAgentTyping()"
                 placeholder="Répondre au client..."
                 class="flex-1 px-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-amber-500/50 resize-none max-h-40 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white dark:placeholder-slate-500"></textarea>
               <button type="submit" [disabled]="!agentMessage.trim()" aria-label="Envoyer"
@@ -804,6 +822,14 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   private sessionSocket$: WebSocketSubject<any> | null = null;
   private currentAgentMatricule = '';
   private destroyRef = inject(DestroyRef);
+  // Typing indicators (client ↔ agent)
+  clientTyping = signal(false);
+  private clientTypingTimer: any;
+  private agentTypingSentAt = 0;
+  private agentTypingStopTimer: any;
+  // Opt-in new-escalation alerts (sound + desktop notification)
+  alertsEnabled = signal(localStorage.getItem('iway_agent_alerts') === '1');
+  private audioCtx: AudioContext | null = null;
 
   constructor(
     private authService: AuthService,
@@ -850,6 +876,12 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.eventSub = this.wsService.getMessages().subscribe(msg => {
       if (msg.type === 'NEW_ESCALATION') {
         this.toastService.show('Nouvelle escalation reçue', 'warning');
+        // Opt-in: audible + desktop alert so an agent looking elsewhere doesn't
+        // miss an urgent handoff.
+        if (this.alertsEnabled()) {
+          this.playAlertSound();
+          this.notifyDesktop('Nouvelle escalation', msg.payload?.user_name || 'Un client attend un agent');
+        }
         // Flag it as unseen unless the agent is already looking at it.
         const sid = msg.payload?.session_id || msg.payload?.id;
         if (sid && this.activeSession()?.id !== sid) {
@@ -952,6 +984,9 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.clarifyText = '';
     this.lastSuggestionGrounded.set(null);
     this.sessionWsConnected.set(false);
+    this.clientTyping.set(false);
+    clearTimeout(this.clientTypingTimer);
+    this.stopAgentTyping();
     this.loadHistory(item.id);
     this.sessionSocket$?.complete();
     this.sessionSocket$ = null;
@@ -1141,8 +1176,13 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (msg: any) => {
         if (msg.type === 'user_message') {
+          this.clientTyping.set(false);
           this.chatHistory.update(h => [...h, { role: 'user', content: msg.content, timestamp: msg.timestamp }]);
           setTimeout(() => this.scrollChat(), 50);
+        } else if (msg.type === 'typing' && msg.from === 'user') {
+          this.clientTyping.set(!!msg.is_typing);
+          clearTimeout(this.clientTypingTimer);
+          if (msg.is_typing) this.clientTypingTimer = setTimeout(() => this.clientTyping.set(false), 6000);
         }
       }
     });
@@ -1159,12 +1199,33 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
       return;
     }
     const content = this.agentMessage.trim();
+    this.stopAgentTyping();
     this.sessionSocket$.next({ type: 'agent_message', content });
     this.agentMessage = '';
     this.lastSuggestionGrounded.set(null);
     this.resetAgentInputHeight();
     this.chatHistory.update(h => [...h, { role: 'agent', content }]);
     setTimeout(() => this.scrollChat(), 50);
+  }
+
+  /** Debounced "agent is typing" → relayed to the client. */
+  onAgentTyping(): void {
+    if (!this.sessionSocket$ || !this.sessionWsConnected()) return;
+    const now = Date.now();
+    if (now - this.agentTypingSentAt > 3000) {
+      this.sessionSocket$.next({ type: 'typing', is_typing: true });
+      this.agentTypingSentAt = now;
+    }
+    clearTimeout(this.agentTypingStopTimer);
+    this.agentTypingStopTimer = setTimeout(() => this.stopAgentTyping(), 3000);
+  }
+
+  private stopAgentTyping(): void {
+    clearTimeout(this.agentTypingStopTimer);
+    this.agentTypingSentAt = 0;
+    if (this.sessionSocket$ && this.sessionWsConnected()) {
+      this.sessionSocket$.next({ type: 'typing', is_typing: false });
+    }
   }
 
   // ─── AI Co-pilot ───
@@ -1327,6 +1388,51 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   trackBySession = (_: number, item: QueueItem) => item.id;
+
+  /** Toggle opt-in alerts; requests desktop-notification permission on enable. */
+  toggleAlerts(): void {
+    const next = !this.alertsEnabled();
+    this.alertsEnabled.set(next);
+    localStorage.setItem('iway_agent_alerts', next ? '1' : '0');
+    if (next) {
+      this.playAlertSound(); // confirm it's audible
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+      this.toastService.show('Alertes activées (son + notification)', 'success');
+    } else {
+      this.toastService.show('Alertes désactivées', 'info');
+    }
+  }
+
+  /** Short WebAudio beep — avoids shipping an audio asset. */
+  private playAlertSound(): void {
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      this.audioCtx = this.audioCtx || new Ctx();
+      const ctx = this.audioCtx!;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.36);
+    } catch { /* audio blocked — non-fatal */ }
+  }
+
+  private notifyDesktop(title: string, body: string): void {
+    try {
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification(title, { body, icon: '/favicon.ico' });
+      }
+    } catch { /* non-fatal */ }
+  }
 
   resolveSession(): void {
     const session = this.activeSession();
@@ -1507,5 +1613,7 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     this.sessionSocket$?.complete();
     this.wsService.disconnect();
     if (this.clockTimer) clearInterval(this.clockTimer);
+    clearTimeout(this.clientTypingTimer);
+    clearTimeout(this.agentTypingStopTimer);
   }
 }

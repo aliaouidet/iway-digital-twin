@@ -235,6 +235,22 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                 await websocket.send_json({"type": "history", "messages": session["history"]})
                 continue
 
+            if msg_type == "typing":
+                # Relay a lightweight typing indicator to the OTHER party on this
+                # session (agent↔client). Best-effort: never persisted, never
+                # blocks, a dead peer socket is silently ignored.
+                peer = session.get("user_ws") if is_agent else session.get("agent_ws")
+                if peer is not None:
+                    try:
+                        await peer.send_json({
+                            "type": "typing",
+                            "from": "agent" if is_agent else "user",
+                            "is_typing": bool(msg.get("is_typing")),
+                        })
+                    except Exception:
+                        pass
+                continue
+
             if msg_type == "user_message":
                 content = msg.get("content", "").strip()
                 if not content:
