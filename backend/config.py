@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     IWAY_SOAP_TIMEOUT: int = 15            # Per-call read timeout (seconds)
     IWAY_SOAP_CONNECT_TIMEOUT: int = 5     # TCP connect timeout — short, so an
                                            # unreachable ERP degrades in seconds, not 30+
+    IWAY_REFERENTIAL_TTL_HOURS: int = 24   # Redis TTL for non-personal referential lists
+                                           # (villes/gouvernorats, secteurs, spécialités)
+    PROVIDER_SEARCH_MAX_RESULTS: int = 8   # Cap on prestataire-search rows surfaced to the
+                                           # LLM/UI (searchPsWithConvTP can return ~1 MB)
 
     # --- JWT ---
     JWT_ALGORITHM: str = "RS256"

@@ -30,6 +30,9 @@ from backend.domain.graph.nodes import (
     beneficiary_lookup_node,
     reclamation_lookup_node,
     dossier_detail_lookup_node,
+    plafond_lookup_node,
+    facture_lookup_node,
+    provider_search_node,
     draft_response_node,
     clarification_node,
     handoff_node,
@@ -82,6 +85,9 @@ def build_claims_graph(checkpointer=None):
     graph.add_node("beneficiary_lookup", beneficiary_lookup_node)
     graph.add_node("reclamation_lookup", reclamation_lookup_node)
     graph.add_node("dossier_detail_lookup", dossier_detail_lookup_node)
+    graph.add_node("plafond_lookup", plafond_lookup_node)
+    graph.add_node("facture_lookup", facture_lookup_node)
+    graph.add_node("provider_search", provider_search_node)
     graph.add_node("multi_executor", multi_executor_node)
     graph.add_node("draft_response", draft_response_node)
     graph.add_node("compliance_check", compliance_check_node)
@@ -117,12 +123,13 @@ def build_claims_graph(checkpointer=None):
             "claim_extraction": "claim_extraction",
             "escalation": "escalation",
             "action_router": "action_router",
+            "provider_search": "provider_search",
             "draft_response": "draft_response",
             "multi_executor": "multi_executor",
         },
     )
 
-    # Action Router → Route to specific DB tool (4-way branch)
+    # Action Router → Route to specific DB tool (6-way branch)
     graph.add_conditional_edges(
         "action_router",
         route_action,
@@ -131,6 +138,8 @@ def build_claims_graph(checkpointer=None):
             "beneficiary_lookup": "beneficiary_lookup",
             "reclamation_lookup": "reclamation_lookup",
             "dossier_detail_lookup": "dossier_detail_lookup",
+            "facture_lookup": "facture_lookup",
+            "plafond_lookup": "plafond_lookup",
         },
     )
 
@@ -142,6 +151,9 @@ def build_claims_graph(checkpointer=None):
     graph.add_edge("beneficiary_lookup", "draft_response")
     graph.add_edge("reclamation_lookup", "draft_response")
     graph.add_edge("dossier_detail_lookup", "draft_response")
+    graph.add_edge("plafond_lookup", "draft_response")
+    graph.add_edge("facture_lookup", "draft_response")
+    graph.add_edge("provider_search", "draft_response")
 
     # === Multi-intent path ===
     # Multi-executor runs all sub-intents concurrently, then → Draft response

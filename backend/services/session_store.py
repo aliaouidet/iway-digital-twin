@@ -46,7 +46,7 @@ async def hydrate_all_sessions() -> int:
     try:
         from backend.database.connection import async_session_factory
         from backend.database.repositories import get_active_sessions, get_session_messages
-        from backend.routers.auth import MOCK_USERS
+        from backend.routers.auth import resolve_user
     except Exception as e:  # pragma: no cover — import-time env issues
         logger.warning(f"⚠️ Session hydration unavailable: {e}")
         return 0
@@ -72,7 +72,7 @@ async def hydrate_all_sessions() -> int:
                     })
 
                 matricule = db_sess.user_matricule
-                user = MOCK_USERS.get(matricule, {})
+                user = await resolve_user(matricule) or {}
                 status_val = db_sess.status.value if hasattr(db_sess.status, "value") else db_sess.status
 
                 SESSIONS[sid] = {
@@ -81,6 +81,8 @@ async def hydrate_all_sessions() -> int:
                     "user_token": "",  # credentials are never persisted/restored
                     "user_name": f"{user.get('prenom', '')} {user.get('nom', '')}".strip() or matricule,
                     "user_role": user.get("role", "Unknown"),
+                    "user_num_police": user.get("num_police", ""),
+                    "user_id_tiers": user.get("id_tiers", ""),
                     "status": status_val,
                     "history": history,
                     "created_at": db_sess.created_at.isoformat() if db_sess.created_at else None,

@@ -92,6 +92,46 @@ def _mock_reclamations() -> dict:
     }
 
 
+def _mock_plafonds() -> dict:
+    # Consistent with _mock_dossiers (plafond 5000 / consommé 1245) and the
+    # _mock_beneficiaries family.
+    return {
+        "plafonds": [
+            {"beneficiaire": "Ahmed Tounsi", "lien": "titulaire",
+             "montant_plafond": 5000.0, "montant_consomme": 1245.0, "montant_disponible": 3755.0},
+            {"beneficiaire": "Fatma Tounsi", "lien": "conjoint",
+             "montant_plafond": 3000.0, "montant_consomme": 410.0, "montant_disponible": 2590.0},
+            {"beneficiaire": "Youssef Tounsi", "lien": "enfant",
+             "montant_plafond": 2000.0, "montant_consomme": 180.0, "montant_disponible": 1820.0},
+        ],
+        "nombre_beneficiaires": 3,
+    }
+
+
+def _mock_factures(role: str) -> dict:
+    if role == "Prestataire":
+        return {
+            "factures": [
+                {"num_facture": "FACT-2026-0231", "date": "2026-04-22", "montant": 1840.0,
+                 "statut": "En cours de traitement", "nature": "Facture bordereau"},
+                {"num_facture": "FACT-2026-0198", "date": "2026-03-30", "montant": 2620.0,
+                 "statut": "Réglée", "nature": "Facture tiers payant"},
+            ],
+            "result_size": 2,
+            "role_vue": "prestataire",
+        }
+    return {
+        "factures": [
+            {"num_facture": "FA-2026-0412", "date": "2026-04-10", "montant": 95.0,
+             "statut": "En cours", "nature": "Analyses"},
+            {"num_facture": "FA-2026-0388", "date": "2026-03-15", "montant": 180.0,
+             "statut": "Remboursée", "nature": "Consultation"},
+        ],
+        "result_size": 2,
+        "role_vue": "adherent",
+    }
+
+
 def _mock_dossier_detail(num_dossier: str | None) -> dict:
     return {
         "dossier_detail": {
@@ -141,9 +181,10 @@ async def dossier_lookup_node(state: ClaimsGraphState) -> dict:
             # the latency budget. return_exceptions=True so one failure doesn't
             # orphan the sibling call: a single failure degrades to a partial
             # result; only a double failure falls back to mock.
+            num_police = state.get("num_police", "")
             contrat, remboursements = await asyncio.gather(
-                soap.get_contrat_adherent(matricule),
-                soap.get_list_remboursement(matricule),
+                soap.get_contrat_adherent(matricule, num_police),
+                soap.get_list_remboursement(matricule, num_police),
                 return_exceptions=True,
             )
             if isinstance(contrat, BaseException) and isinstance(remboursements, BaseException):
@@ -201,7 +242,7 @@ async def beneficiary_lookup_node(state: ClaimsGraphState) -> dict:
         try:
             from backend.services import iway_soap_client as soap
 
-            beneficiaires = await soap.get_beneficiaires(matricule)
+            beneficiaires = await soap.get_beneficiaires(matricule, state.get("num_police", ""))
             records = {
                 "beneficiaires": beneficiaires,
                 "nombre_beneficiaires": len(beneficiaires),
@@ -233,7 +274,7 @@ async def reclamation_lookup_node(state: ClaimsGraphState) -> dict:
         try:
             from backend.services import iway_soap_client as soap
 
-            reclamations = await soap.get_list_reclamation(matricule)
+            reclamations = await soap.get_list_reclamation(matricule, state.get("num_police", ""))
             records = {
                 "reclamations": reclamations,
                 "nombre_reclamations": len(reclamations),
@@ -286,4 +327,72 @@ async def dossier_detail_lookup_node(state: ClaimsGraphState) -> dict:
 
     mock = _mock_dossier_detail(num_dossier)
     logger.info(f"Dossier detail lookup returned mock for {mock['dossier_detail']['num_dossier']}")
+    return {"system_records": mock}
+
+
+async def plafond_lookup_node(state: ClaimsGraphState) -> dict:
+    """
+    Node 2g: Plafond / Consommation Lookup.
+
+    Per-beneficiary annual ceiling, consumed and remaining amounts.
+
+    Real path (IWAY_USE_REAL_API): contratAdherentWSMeg.getListPlafondBeneficiairesByMatricule.
+    NOTE: the op faults on the current ERP test data (the test adherent has no
+    bénéficiaires) — the honest-degradation answer IS the expected live behavior
+    until I-Way provisions richer test data.
+    """
+    matricule = state.get("matricule", "unknown")
+    logger.info(f"Plafond lookup for matricule: {matricule}")
+
+    if settings.IWAY_USE_REAL_API:
+        try:
+            from backend.services import iway_soap_client as soap
+
+            plafonds = await soap.get_plafonds_beneficiaires(
+                matricule, state.get("num_police", "")
+            )
+            records = {"plafonds": plafonds, "nombre_beneficiaires": len(plafonds)}
+            logger.info(f"Plafond lookup (real API) ok — {len(plafonds)} bénéficiaire(s)")
+            return {"system_records": records}
+        except Exception as e:
+            logger.warning(f"⚠️ Real plafond lookup failed ({e}); degrading honestly")
+            return {"system_records": _service_unavailable("plafonds et consommation")}
+
+    mock = _mock_plafonds()
+    logger.info(f"Plafond lookup returned {len(mock['plafonds'])} rows (mock)")
+    return {"system_records": mock}
+
+
+async def facture_lookup_node(state: ClaimsGraphState) -> dict:
+    """
+    Node 2h: Facture Lookup (role-aware).
+
+    Adhérents get their own invoices (factureWS.searchFacture); Prestataires get
+    the invoices they submitted (facturePsWS.searchListFactureByPs via the
+    id_tiers carried in state).
+    """
+    matricule = state.get("matricule", "unknown")
+    role = state.get("role", "")
+    logger.info(f"Facture lookup for matricule: {matricule} (role={role or 'Adherent'})")
+
+    if settings.IWAY_USE_REAL_API:
+        try:
+            from backend.services import iway_soap_client as soap
+
+            if role == "Prestataire" and state.get("id_tiers"):
+                result = await soap.search_factures_ps(state["id_tiers"])
+                records = {**result, "role_vue": "prestataire"}
+            else:
+                result = await soap.search_factures_adherent(
+                    matricule, state.get("num_police", "")
+                )
+                records = {**result, "role_vue": "adherent"}
+            logger.info(f"Facture lookup (real API) ok — {len(records.get('factures', []))} facture(s)")
+            return {"system_records": records}
+        except Exception as e:
+            logger.warning(f"⚠️ Real facture lookup failed ({e}); degrading honestly")
+            return {"system_records": _service_unavailable("factures")}
+
+    mock = _mock_factures(role)
+    logger.info(f"Facture lookup returned {len(mock['factures'])} rows (mock, {mock['role_vue']})")
     return {"system_records": mock}

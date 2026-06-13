@@ -24,7 +24,7 @@ logger = logging.getLogger("I-Way-Twin")
 
 class SubIntent(BaseModel):
     """A single decomposed sub-intent."""
-    intent: Literal["info_query", "claim_action", "escalation", "personal_lookup", "small_talk"] = Field(
+    intent: Literal["info_query", "claim_action", "escalation", "personal_lookup", "provider_search", "small_talk"] = Field(
         description="The classified intent category"
     )
     query: str = Field(
@@ -47,8 +47,9 @@ CATEGORIES DISPONIBLES:
 1. "info_query" — Questions sur les regles, plafonds, delais, procedures d'assurance, numeros de support.
 2. "claim_action" — Soumettre une NOUVELLE demande de remboursement (montants, factures, actes medicaux a declarer). (Verifier/suivre un remboursement deja soumis = "personal_lookup".)
 3. "escalation" — Utilisateur mecontent, demande explicitement un agent humain, ou veut DEPOSER une nouvelle reclamation. (Demander le STATUT d'une reclamation existante = "personal_lookup", PAS "escalation".)
-4. "personal_lookup" — Consulter ses donnees personnelles (dossiers, beneficiaires, historique, remboursements, statut/suivi de ses reclamations existantes, detail d'un dossier precis).
-5. "small_talk" — Salutations, remerciements, politesses sans requete specifique.
+4. "personal_lookup" — Consulter ses donnees personnelles (dossiers, beneficiaires, historique, remboursements, factures, plafonds/consommation, statut/suivi de ses reclamations existantes, detail d'un dossier precis).
+5. "provider_search" — Chercher un prestataire de soins conventionne (medecin, clinique, pharmacie, laboratoire) par specialite et/ou localisation. (PAS ses propres donnees.)
+6. "small_talk" — Salutations, remerciements, politesses sans requete specifique.
 
 REGLES:
 - Si le message contient UNE SEULE intention, retourne un array avec UN SEUL element.
@@ -61,7 +62,8 @@ Exemples:
 - "Bonjour" -> [{"intent": "small_talk", "query": "Bonjour"}]
 - "Quels sont mes dossiers ?" -> [{"intent": "personal_lookup", "query": "Quels sont mes dossiers ?"}]
 - "Liste mes dossiers et donne-moi le plafond dentaire" -> [{"intent": "personal_lookup", "query": "Liste mes dossiers"}, {"intent": "info_query", "query": "Quel est le plafond dentaire ?"}]
-- "Ou en sont mes reclamations ?" -> [{"intent": "personal_lookup", "query": "Ou en sont mes reclamations ?"}]"""
+- "Ou en sont mes reclamations ?" -> [{"intent": "personal_lookup", "query": "Ou en sont mes reclamations ?"}]
+- "Trouve-moi un cardiologue conventionne a Sousse" -> [{"intent": "provider_search", "query": "Trouve-moi un cardiologue conventionne a Sousse"}]"""
 
 
 # Map string -> enum
@@ -70,6 +72,7 @@ _INTENT_MAP = {
     "claim_action": ClaimIntent.CLAIM_ACTION,
     "escalation": ClaimIntent.ESCALATION,
     "personal_lookup": ClaimIntent.PERSONAL_LOOKUP,
+    "provider_search": ClaimIntent.PROVIDER_SEARCH,
     "small_talk": ClaimIntent.SMALL_TALK,
 }
 

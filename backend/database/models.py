@@ -74,6 +74,11 @@ class User(Base):
     specialite = Column(String(100), nullable=True)
     password_hash = Column(String(255), nullable=False)  # Plain text for mock, bcrypt in prod
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # ── Real-ERP identity (activation flow, routers/auth.py) ──
+    num_police = Column(String(30), nullable=True)   # adherent policy number (SOAP lookups need it)
+    id_tiers = Column(String(30), nullable=True)     # prestataire ERP id
+    source = Column(String(10), nullable=False, default="mock")  # "mock" | "erp"
+    last_login = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     sessions = relationship("Session", back_populates="user", foreign_keys="Session.user_matricule")

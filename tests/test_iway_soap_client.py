@@ -30,9 +30,16 @@ WSDL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Webservices
 # 1. WSDL parsing (offline) — requires zeep + the bundled WSDLs
 # ──────────────────────────────────────────────────────────────
 TARGET_OPS = {
-    "contrat": ["getContratAdherentByMatricule", "getListeBeneficiairesByMatricule"],
+    "contrat": ["getContratAdherentByMatricule", "getListeBeneficiairesByMatricule",
+                "getListPlafondBeneficiairesByMatricule"],
     "remboursement": ["getListRemboursementByMatricule", "getDossierRemboursementByNumDossier", "createBsDigital"],
     "reclamation": ["getListReclamationByMatricule", "createReclamation"],
+    "contrat_ps": ["getContratPsByMatriculeFiscal", "getContratPsByIdTiers"],
+    "prestataire_search": ["searchPsWithConvTP"],
+    "recherche_specialite": ["getListSecteurActivitesPS", "getListSpecialiteBySecteurActivite",
+                             "getListVilleAndGouvernorat"],
+    "facture": ["searchFacture"],
+    "facture_ps": ["searchListFactureByPs", "getFacturePsByIdTier"],
 }
 
 
@@ -601,3 +608,312 @@ def test_map_remboursement_list_projects_rows():
     }
     out = soap._map_remboursement_list(dto)
     assert out["dossiers"] == [{"numDossier": "D-9"}]   # name stripped
+
+
+# ══════════════════════════════════════════════════════════════
+# WAVE 2 — new services (auth identity, providers, plafonds, factures)
+# ══════════════════════════════════════════════════════════════
+
+# ── 10. New mappers ──────────────────────────────────────────
+def test_map_identity_extracts_activation_fields():
+    dto = {
+        "numContrat": "C-1",
+        "personnePhysique": {
+            "nom": "Mansour", "prenom": "Nadia", "nomComplet": "Nadia Mansour",
+            "dateNaissance": "1985-06-12", "numeroPieceId": "09876543",
+            "numeroPolice": "12012500000011",
+        },
+    }
+    out = soap._map_identity(dto)
+    assert out["nom"] == "Mansour"
+    assert out["date_naissance"] == "1985-06-12"
+    assert out["cin"] == "09876543"
+    assert out["num_police"] == "12012500000011"
+
+
+def test_map_prestataire_from_real_shape():
+    # Shape captured from the live searchPsWithConvTP response (web-s/)
+    dto = {
+        "nom": " LABORATOIRE MEMMI AND MAHJOUBI (LAB2M)",
+        "numTelBureau": "", "numTelFixe": "71830388", "numTelMobile": "98348038",
+        "secteurActivite": "Centre Analyse Médical", "specialite": "",
+        "adresse": {
+            "adresse": "35,RUE DE PALESTINE  ",
+            "gouvernorat": {"libelle": "Tunis"},
+            "ville": {"libelle": ""},
+        },
+    }
+    out = soap._map_prestataire(dto)
+    assert out["nom"] == "LABORATOIRE MEMMI AND MAHJOUBI (LAB2M)"   # stripped
+    assert out["secteur"] == "Centre Analyse Médical"
+    assert out["specialite"] is None                                  # empty → None
+    assert out["gouvernorat"] == "Tunis"
+    assert out["ville"] is None                                       # empty libelle → None
+    assert out["telephone"] == "71830388"                             # fixe preferred
+    assert out["conventionne"] is True
+
+
+def test_map_plafond_defensive_fields():
+    dto = {
+        "beneficiaire": {"nomComplet": "Fatma Tounsi"},
+        "lienParental": {"libelle": "Conjoint"},
+        "montantPlafond": 3000.0, "montantConsomme": 410.0, "montantDisponible": 2590.0,
+    }
+    out = soap._map_plafond(dto)
+    assert out["beneficiaire"] == "Fatma Tounsi"
+    assert out["lien"] == "Conjoint"
+    assert out["montant_disponible"] == 2590.0
+
+
+def test_map_facture_projects_then_plucks():
+    # FacturePsDto carries name fields — they must be DROPPED by the whitelist
+    # before any pluck (matriculeAdh is whitelisted-but-unplucked: also absent).
+    dto = {
+        "reference": "231FACTMP710602YPC000",
+        "dateCreation": "2026-04-22",
+        "mntFacture": 1840.0,
+        "natureFacture": "Facture temporaire",
+        "nomPs": "SECRET PROVIDER",
+        "nomAdherent": "SECRET NAME",
+    }
+    out = soap._map_facture(dto)
+    assert out["num_facture"] == "231FACTMP710602YPC000"
+    assert out["date"] == "2026-04-22"
+    assert out["montant"] == 1840.0
+    assert out["nature"] == "Facture temporaire"
+    assert "SECRET" not in str(out)
+
+
+def test_search_prestataires_filters_and_caps(monkeypatch):
+    rows = (
+        [{"nom": f"Dr Cardio {i}", "specialite": "Cardiologie",
+          "secteurActivite": "Médecin",
+          "adresse": {"gouvernorat": {"libelle": "Sousse"}, "ville": {"libelle": "Sousse"}, "adresse": "x"}}
+         for i in range(12)]
+    )
+    extra = [{"nom": "Dr Dermato", "specialite": "Dermatologie",
+              "secteurActivite": "Médecin",
+              "adresse": {"gouvernorat": {"libelle": "Tunis"}, "ville": {"libelle": ""}, "adresse": "y"}}]
+
+    async def _call_stub(service, op, **k):
+        assert op == "searchPsWithConvTP"
+        return list(rows) + extra
+
+    monkeypatch.setattr(soap, "_call", _call_stub)
+    out = asyncio.run(soap.search_prestataires(specialite="cardiologie", gouvernorat="sousse"))
+
+    assert len(out) == soap.settings.PROVIDER_SEARCH_MAX_RESULTS      # capped
+    assert all("Cardio" in r["nom"] for r in out)                     # client-side refinement
+    assert all(r["gouvernorat"] == "Sousse" for r in out)
+
+
+def test_get_contrat_ps_by_matricule_fiscal_returns_id_tiers(monkeypatch):
+    async def _call_stub(service, op, **k):
+        assert op == "getContratPsByMatriculeFiscal"
+        return "151537"
+
+    monkeypatch.setattr(soap, "_call", _call_stub)
+    out = asyncio.run(soap.get_contrat_ps_by_matricule_fiscal("0710602Y"))
+    assert out == {"id_tiers": "151537"}
+
+
+def test_existing_reads_pass_num_police(monkeypatch):
+    """The live ERP REQUIRES numPolice on the adherent reads — regression guard
+    for the previously-missing parameter."""
+    captured = {}
+
+    async def _call_spy(service, op, _retries=2, **k):
+        captured[op] = k
+        return None
+
+    monkeypatch.setattr(soap, "_call", _call_spy)
+    asyncio.run(soap.get_contrat_adherent("10012", "POL-1"))
+    asyncio.run(soap.get_beneficiaires("10012", "POL-1"))
+    asyncio.run(soap.get_list_remboursement("10012", "POL-1"))
+    asyncio.run(soap.get_list_reclamation("10012", "POL-1"))
+
+    assert captured["getContratAdherentByMatricule"]["numPolice"] == "POL-1"
+    assert captured["getListeBeneficiairesByMatricule"]["numPolice"] == "POL-1"
+    assert captured["getListRemboursementByMatricule"]["numPolice"] == "POL-1"
+    assert captured["getListReclamationByMatricule"]["numPolice"] == "POL-1"
+
+
+# ── 11. New lookup nodes: plafonds + factures (role-aware) ──
+def test_plafond_node_mock_when_toggle_off(monkeypatch):
+    from backend.domain.graph.nodes import lookups
+    monkeypatch.setattr(lookups.settings, "IWAY_USE_REAL_API", False, raising=False)
+    out = asyncio.run(lookups.plafond_lookup_node({"matricule": "12345"}))
+    assert out["system_records"]["nombre_beneficiaires"] == 3
+    assert out["system_records"]["plafonds"][0]["montant_plafond"] == 5000.0
+
+
+def test_plafond_node_real_success(monkeypatch):
+    from backend.domain.graph.nodes import lookups
+    monkeypatch.setattr(lookups.settings, "IWAY_USE_REAL_API", True, raising=False)
+
+    captured = {}
+
+    async def _ok(matricule, num_police=""):
+        captured["num_police"] = num_police
+        return [{"beneficiaire": "X", "montant_plafond": 1000.0}]
+
+    monkeypatch.setattr(soap, "get_plafonds_beneficiaires", _ok)
+    out = asyncio.run(lookups.plafond_lookup_node({"matricule": "10012", "num_police": "POL-1"}))
+    assert captured["num_police"] == "POL-1"
+    assert out["system_records"]["plafonds"][0]["montant_plafond"] == 1000.0
+
+
+def test_plafond_node_degrades_honestly_in_real_mode(monkeypatch):
+    from backend.domain.graph.nodes import lookups
+    monkeypatch.setattr(lookups.settings, "IWAY_USE_REAL_API", True, raising=False)
+
+    async def _boom(*a, **k):
+        raise RuntimeError("FAULT 3 — pas de bénéficiaires (test data)")
+
+    monkeypatch.setattr(soap, "get_plafonds_beneficiaires", _boom)
+    out = asyncio.run(lookups.plafond_lookup_node({"matricule": "10012"}))
+    assert out["system_records"]["service_indisponible"] is True
+    assert "plafonds" not in out["system_records"]
+
+
+def test_facture_node_mock_both_roles(monkeypatch):
+    from backend.domain.graph.nodes import lookups
+    monkeypatch.setattr(lookups.settings, "IWAY_USE_REAL_API", False, raising=False)
+
+    out_adh = asyncio.run(lookups.facture_lookup_node({"matricule": "12345", "role": "Adherent"}))
+    assert out_adh["system_records"]["role_vue"] == "adherent"
+
+    out_ps = asyncio.run(lookups.facture_lookup_node({"matricule": "99999", "role": "Prestataire"}))
+    assert out_ps["system_records"]["role_vue"] == "prestataire"
+    assert out_ps["system_records"]["factures"][0]["num_facture"].startswith("FACT-")
+
+
+def test_facture_node_real_role_aware(monkeypatch):
+    """Prestataire + id_tiers → search_factures_ps; Adherent → searchFacture."""
+    from backend.domain.graph.nodes import lookups
+    monkeypatch.setattr(lookups.settings, "IWAY_USE_REAL_API", True, raising=False)
+
+    calls = {}
+
+    async def _ps(id_tiers, **k):
+        calls["ps"] = id_tiers
+        return {"result_size": 1, "factures": [{"num_facture": "F-PS"}]}
+
+    async def _adh(matricule, num_police="", **k):
+        calls["adh"] = (matricule, num_police)
+        return {"result_size": 1, "factures": [{"num_facture": "F-ADH"}]}
+
+    monkeypatch.setattr(soap, "search_factures_ps", _ps)
+    monkeypatch.setattr(soap, "search_factures_adherent", _adh)
+
+    out = asyncio.run(lookups.facture_lookup_node(
+        {"matricule": "0710602Y", "role": "Prestataire", "id_tiers": "151537"}))
+    assert calls["ps"] == "151537"
+    assert out["system_records"]["role_vue"] == "prestataire"
+
+    out = asyncio.run(lookups.facture_lookup_node(
+        {"matricule": "10012", "role": "Adherent", "num_police": "POL-1"}))
+    assert calls["adh"] == ("10012", "POL-1")
+    assert out["system_records"]["role_vue"] == "adherent"
+
+
+def test_facture_node_degrades_honestly_in_real_mode(monkeypatch):
+    from backend.domain.graph.nodes import lookups
+    monkeypatch.setattr(lookups.settings, "IWAY_USE_REAL_API", True, raising=False)
+
+    async def _boom(*a, **k):
+        raise RuntimeError("server unreachable")
+
+    monkeypatch.setattr(soap, "search_factures_adherent", _boom)
+    out = asyncio.run(lookups.facture_lookup_node({"matricule": "10012", "role": "Adherent"}))
+    assert out["system_records"]["service_indisponible"] is True
+    assert "factures" not in out["system_records"]
+
+
+# ── 12. Provider search node ─────────────────────────────────
+def _provider_state(text):
+    from langchain_core.messages import HumanMessage
+    return {"matricule": "12345", "messages": [HumanMessage(content=text)]}
+
+
+def _stub_gouvernorats(monkeypatch):
+    """Real-mode known_gouvernorats() would hit Redis + the live referential —
+    pin it to the static list so tests stay fast and offline."""
+    from backend.services import referentials
+
+    async def _static():
+        return list(referentials.GOUVERNORATS_TN)
+
+    monkeypatch.setattr(referentials, "known_gouvernorats", _static)
+
+
+def test_provider_node_mock_filters(monkeypatch):
+    from backend.domain.graph.nodes import provider_search as ps
+    monkeypatch.setattr(ps.settings, "IWAY_USE_REAL_API", False, raising=False)
+
+    out = asyncio.run(ps.provider_search_node(_provider_state(
+        "trouve-moi un cardiologue conventionné à Sousse")))
+    records = out["system_records"]
+    assert records["criteres"] == {"specialite": "Cardiologie", "gouvernorat": "Sousse"}
+    assert records["prestataires"], "mock should return at least one row"
+    assert all(p["specialite"] == "Cardiologie" for p in records["prestataires"])
+
+
+def test_provider_node_real_success(monkeypatch):
+    from backend.domain.graph.nodes import provider_search as ps
+    monkeypatch.setattr(ps.settings, "IWAY_USE_REAL_API", True, raising=False)
+    _stub_gouvernorats(monkeypatch)
+
+    captured = {}
+
+    async def _search(specialite="", gouvernorat="", num_police="", **k):
+        captured.update(specialite=specialite, gouvernorat=gouvernorat)
+        return [{"nom": "Dr X", "specialite": "Cardiologie", "gouvernorat": "Sousse", "conventionne": True}]
+
+    monkeypatch.setattr(soap, "search_prestataires", _search)
+    out = asyncio.run(ps.provider_search_node(_provider_state("un cardiologue à Sousse")))
+
+    assert captured == {"specialite": "Cardiologie", "gouvernorat": "Sousse"}
+    assert out["system_records"]["nombre_resultats"] == 1
+
+
+def test_provider_node_real_requires_filters(monkeypatch):
+    """Real mode must NOT pull the unfiltered ~1 MB directory — it asks the
+    user to narrow the search instead."""
+    from backend.domain.graph.nodes import provider_search as ps
+    monkeypatch.setattr(ps.settings, "IWAY_USE_REAL_API", True, raising=False)
+    _stub_gouvernorats(monkeypatch)
+
+    async def _must_not_be_called(**k):
+        raise AssertionError("unfiltered directory pull")
+
+    monkeypatch.setattr(soap, "search_prestataires", _must_not_be_called)
+    out = asyncio.run(ps.provider_search_node(_provider_state("je cherche un prestataire")))
+
+    assert out["system_records"]["prestataires"] == []
+    assert "precision_requise" in out["system_records"]
+
+
+def test_provider_node_degrades_honestly_in_real_mode(monkeypatch):
+    from backend.domain.graph.nodes import provider_search as ps
+    monkeypatch.setattr(ps.settings, "IWAY_USE_REAL_API", True, raising=False)
+    _stub_gouvernorats(monkeypatch)
+
+    async def _boom(**k):
+        raise RuntimeError("server unreachable")
+
+    monkeypatch.setattr(soap, "search_prestataires", _boom)
+    out = asyncio.run(ps.provider_search_node(_provider_state("un dentiste à Sfax")))
+    assert out["system_records"]["service_indisponible"] is True
+
+
+# ── 13. Classifier routes for the new personal tools ─────────
+def test_classify_personal_lookup_wave2_routes():
+    from backend.domain.graph import routing
+    assert routing.classify_personal_lookup("mes factures en cours") == "facture_lookup"
+    assert routing.classify_personal_lookup("où en est ma facture ?") == "facture_lookup"
+    assert routing.classify_personal_lookup("mon plafond restant") == "plafond_lookup"
+    assert routing.classify_personal_lookup("combien ai-je consommé ?") == "plafond_lookup"
+    # Pre-existing routes must be unchanged
+    assert routing.classify_personal_lookup("Où en sont mes réclamations ?") == "reclamation_lookup"
+    assert routing.classify_personal_lookup("montre mes dossiers de remboursement") == "dossier_lookup"

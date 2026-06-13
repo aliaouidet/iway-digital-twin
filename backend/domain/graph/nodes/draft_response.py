@@ -106,7 +106,8 @@ def _has_meaningful_records(records: dict) -> bool:
         return False
     if records.get("contrat") or records.get("dossier_detail"):
         return True
-    if any(records.get(k) for k in ("dossiers", "beneficiaires", "reclamations")):
+    if any(records.get(k) for k in ("dossiers", "beneficiaires", "reclamations",
+                                    "factures", "plafonds", "prestataires")):
         return True
     remb = records.get("remboursements")
     if isinstance(remb, dict) and (remb.get("dossiers") or remb.get("result_size")):
@@ -367,6 +368,12 @@ async def draft_response_node(state: ClaimsGraphState) -> dict:
         tools_used.append("reclamation_lookup")
     if "dossier_detail" in system_records:
         tools_used.append("dossier_detail_lookup")
+    if "factures" in system_records:
+        tools_used.append("facture_lookup")
+    if "plafonds" in system_records:
+        tools_used.append("plafond_lookup")
+    if "prestataires" in system_records:
+        tools_used.append("provider_search")
 
     logger.info(f"Draft ready -- confidence: {confidence:.2f}, length: {len(clean_response)} chars")
 

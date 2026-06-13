@@ -33,6 +33,8 @@ async def _execute_personal_lookup(state: ClaimsGraphState, query: str) -> dict:
         beneficiary_lookup_node,
         reclamation_lookup_node,
         dossier_detail_lookup_node,
+        plafond_lookup_node,
+        facture_lookup_node,
     )
 
     handlers = {
@@ -40,6 +42,8 @@ async def _execute_personal_lookup(state: ClaimsGraphState, query: str) -> dict:
         "beneficiary_lookup": beneficiary_lookup_node,
         "reclamation_lookup": reclamation_lookup_node,
         "dossier_detail_lookup": dossier_detail_lookup_node,
+        "plafond_lookup": plafond_lookup_node,
+        "facture_lookup": facture_lookup_node,
     }
     target = classify_personal_lookup(query)
     node = handlers[target]
@@ -50,8 +54,25 @@ async def _execute_personal_lookup(state: ClaimsGraphState, query: str) -> dict:
     scoped_state["messages"] = list(state["messages"][:-1]) + [HumanMessage(content=query)]
 
     result = await node(scoped_state)
+    result["_tool"] = target  # accurate tools_called label for the merge step
     logger.info(
         f"Personal lookup ({target}) executed: {list(result.get('system_records', {}).keys())}"
+    )
+    return result
+
+
+async def _execute_provider_search(state: ClaimsGraphState, query: str) -> dict:
+    """Execute a provider_search sub-intent (annuaire conventionné — public data)."""
+    from langchain_core.messages import HumanMessage
+    from backend.domain.graph.nodes.provider_search import provider_search_node
+
+    scoped_state = dict(state)
+    scoped_state["messages"] = list(state["messages"][:-1]) + [HumanMessage(content=query)]
+
+    result = await provider_search_node(scoped_state)
+    result["_tool"] = "provider_search"
+    logger.info(
+        f"Provider search executed: {len((result.get('system_records') or {}).get('prestataires', []))} result(s)"
     )
     return result
 
@@ -123,6 +144,10 @@ async def multi_executor_node(state: ClaimsGraphState) -> dict:
             tasks.append(_execute_personal_lookup(state, query))
             task_labels.append(f"personal_lookup")
 
+        elif intent == "provider_search":
+            tasks.append(_execute_provider_search(state, query))
+            task_labels.append(f"provider_search: {query[:40]}")
+
         elif intent == "info_query":
             tasks.append(_execute_info_query(state, query))
             task_labels.append(f"info_query: {query[:40]}")
@@ -165,10 +190,13 @@ async def multi_executor_node(state: ClaimsGraphState) -> dict:
         if not isinstance(result, dict):
             continue
 
-        # Merge system_records (dossier/beneficiary data)
+        # Merge system_records (dossier/beneficiary/facture/provider data).
+        # The executing helper tags the actual tool under "_tool" — previously
+        # every lookup was mislabeled "dossier_lookup", which broke cache-policy
+        # decisions and telemetry for the other personal tools.
         if "system_records" in result and result["system_records"]:
             merged_system_records.update(result["system_records"])
-            merged_tools_called.append("dossier_lookup")
+            merged_tools_called.append(result.get("_tool", "dossier_lookup"))
 
         # Merge retrieved_docs (RAG results)
         if "retrieved_docs" in result and result["retrieved_docs"]:

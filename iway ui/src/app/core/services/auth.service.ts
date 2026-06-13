@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { LoginRequest, LoginResponse, User, UserRole } from '../../shared/models';
+import { ActivateRequest, LoginRequest, LoginResponse, User, UserRole } from '../../shared/models';
 
 const TOKEN_KEY = 'iway_token';
 const USER_KEY = 'iway_user';
@@ -18,6 +18,20 @@ export class AuthService {
     return this.http.post<LoginResponse>(
       `${environment.apiUrl}/auth/login`,
       credentials
+    ).pipe(
+      tap(response => {
+        localStorage.setItem(TOKEN_KEY, response.access_token);
+        localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+        this.userSubject.next(response.user);
+      })
+    );
+  }
+
+  /** First-login activation (real-ERP mode) — auto-logs-in on success. */
+  activate(data: ActivateRequest): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(
+      `${environment.apiUrl}/auth/activate`,
+      data
     ).pipe(
       tap(response => {
         localStorage.setItem(TOKEN_KEY, response.access_token);

@@ -89,6 +89,9 @@ _NODE_LABELS = {
     "beneficiary_lookup": "Vérification de vos bénéficiaires...",
     "reclamation_lookup": "Consultation de vos réclamations...",
     "dossier_detail_lookup": "Recherche du détail de votre dossier...",
+    "plafond_lookup": "Consultation de vos plafonds et consommation...",
+    "facture_lookup": "Consultation de vos factures...",
+    "provider_search": "Recherche de prestataires conventionnés...",
     "draft_response": "Rédaction de la réponse...",
     "clarification": "Vérification des informations...",
     "handoff": "Transfert vers un superviseur...",
@@ -126,6 +129,9 @@ async def execute_claims_graph(
         "messages": [HumanMessage(content=query)],
         "matricule": session.get("user_matricule", ""),
         "token": session.get("user_token", ""),
+        "num_police": session.get("user_num_police", ""),
+        "role": session.get("user_role", ""),
+        "id_tiers": session.get("user_id_tiers", ""),
         "claim_status": _map_session_to_claim_status(session),
     }
 

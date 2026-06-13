@@ -67,6 +67,8 @@ celerybeat.pid
 .agents
 Webservices/
 .Webservices/
+# Captured ERP probe data — contains REAL personal data (CIN/DOB), never commit
+web-s/
 CLAUDE.md
 # rapport
 rapport_pfe

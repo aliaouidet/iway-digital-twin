@@ -132,3 +132,61 @@ class TestRouting:
     ])
     def test_extract_dossier_number(self, msg, expected):
         assert extract_dossier_number(msg) == expected
+
+
+# ==============================================================
+# Invariant 5 — wave 2 tools: provider search is PUBLIC (cacheable),
+# factures/plafonds are PERSONAL (never cached, cache lookup bypassed)
+# ==============================================================
+
+class TestWave2CachePolicy:
+    _BASE = {"source": "claims_graph", "confidence": 90, "degraded": False, "text": "ok"}
+
+    def test_provider_search_response_IS_cacheable(self):
+        """The headline wave-2 invariant: the conventioned-provider directory is
+        public data — two users asking for 'un cardiologue à Sousse' may share
+        a cached answer."""
+        result = {**self._BASE, "intent": "provider_search", "tools_called": ["provider_search"]}
+        assert is_cacheable_response(result) is True
+
+    @pytest.mark.parametrize("tool", ["facture_lookup", "plafond_lookup"])
+    def test_new_personal_tools_never_cached(self, tool):
+        result = {**self._BASE, "intent": "personal_lookup", "tools_called": [tool]}
+        assert is_cacheable_response(result) is False
+
+    @pytest.mark.parametrize("q", [
+        "mes factures",
+        "où en est ma facture ?",
+        "liste les factures",                 # possessive-less imperative
+        "affiche la consommation de mon plafond",
+        "mon plafond restant",
+    ])
+    def test_facture_plafond_queries_bypass_cache(self, q):
+        assert is_personal_query(q) is True
+
+    def test_provider_query_is_a_cacheable_lookup(self):
+        assert is_personal_query("trouver un cardiologue conventionné à Sousse") is False
+
+
+class TestWave2PiiShield:
+    def test_plafond_records_shield_beneficiary_name(self):
+        records = {"plafonds": [{
+            "beneficiaire": "Fatma Tounsi", "lien": "conjoint",
+            "montant_plafond": 3000.0, "montant_consomme": 410.0,
+        }]}
+        shielded, mapping = pseudonymize_records(records)
+        blob = str(shielded)
+        assert "Fatma Tounsi" not in blob
+        assert "3000.0" in blob          # structural amounts stay readable
+        assert "Fatma Tounsi" in mapping.values()
+
+    def test_facture_records_carry_no_person_fields(self):
+        # _map_facture plucks a fixed structural shape — nothing here should be
+        # tokenized, the LLM needs all of it to reason about the invoice.
+        records = {"factures": [{
+            "num_facture": "FACT-2026-0231", "date": "2026-04-22",
+            "montant": 1840.0, "statut": "En cours", "nature": "Facture bordereau",
+        }]}
+        shielded, mapping = pseudonymize_records(records)
+        assert "FACT-2026-0231" in str(shielded)
+        assert mapping == {}

@@ -6,12 +6,20 @@ not REST. This module wraps four of them and maps their verbose DTOs down to the
 compact ``system_records`` dicts the graph already consumes
 (see backend/domain/graph/nodes/draft_response.py).
 
-Services / operations used (MVP scope):
-  - contratAdherentWSMeg   → getContratAdherentByMatricule        (Contrat)
+Services / operations used:
+  - contratAdherentWSMeg   → getContratAdherentByMatricule        (Contrat + identité activation)
                              getListeBeneficiairesByMatricule     (Bénéficiaires)
+                             getListPlafondBeneficiairesByMatricule (Plafonds/consommation)
   - remboursementAdherentWS→ getListRemboursementByMatricule      (Liste remboursements)
                              getDossierRemboursementByNumDossier  (Détail dossier)
   - reclamationWS          → getListReclamationByMatricule        (Liste réclamations)
+  - prestatiareWS          → searchPsWithConvTP                   (Recherche PS conventionnés)
+  - rechercheSpecialiteWS  → getListSecteurActivitesPS / getListSpecialiteBySecteurActivite
+                             / getListVilleAndGouvernorat         (Référentiels recherche)
+  - factureWS              → searchFacture                        (Factures adhérent)
+  - facturePsWS            → searchListFactureByPs                (Factures prestataire)
+  - contratPsWS            → getContratPsByMatriculeFiscal / getContratPsByIdTiers
+                             (Identité prestataire — activation)
 
 Design notes:
   * zeep is synchronous; every call is offloaded to a worker thread via
@@ -59,6 +67,10 @@ _WSDL_FILES = {
     "remboursement": "remboursementAdherentWS.xml",
     "reclamation": "reclamationWS.xml",
     "contrat_ps": "contratPsWS.xml",
+    "prestataire_search": "prestatiareWS.xml",
+    "recherche_specialite": "rechercheSpecialiteWS.xml",
+    "facture": "factureWS.xml",
+    "facture_ps": "facturePsWS.xml",
 }
 
 # Remote ?wsdl URLs (used when IWAY_SOAP_LOAD_LOCAL_WSDL=false, i.e. on-site)
@@ -67,6 +79,10 @@ _WSDL_REMOTE = {
     "remboursement": "/remboursementAdherentWS?wsdl",
     "reclamation": "/reclamationWS?wsdl",
     "contrat_ps": "/contratPsWS?wsdl",
+    "prestataire_search": "/prestatiareWS?wsdl",
+    "recherche_specialite": "/rechercheSpecialiteWS?wsdl",
+    "facture": "/factureWS?wsdl",
+    "facture_ps": "/facturePsWS?wsdl",
 }
 
 
@@ -317,7 +333,7 @@ def _map_beneficiaire(dto: Any) -> dict:
 # pseudonymization shield can't recognize, so anything unmatched is DROPPED
 # before the rows can reach an external LLM.
 _ROW_SAFE_KEY_RE = re.compile(
-    r"(dossier|reference|\bref|statut|status|date|mnt|montant|tot|taux|num|code|acte|rembours|quittance|rang)",
+    r"(dossier|reference|\bref|statut|status|date|mnt|montant|tot|taux|num|code|acte|rembours|quittance|rang|fact|nature)",
     re.IGNORECASE,
 )
 
@@ -411,6 +427,100 @@ def _as_list(result: Any) -> list:
     return [result]
 
 
+def _clean(value: Any) -> Optional[str]:
+    """Strip a string field; empty/whitespace-only values become None."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def _fold(value: Any) -> str:
+    """Lowercase + strip accents, for tolerant client-side filter matching."""
+    import unicodedata
+    s = str(value or "").lower()
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+def _map_identity(dto: Any) -> dict:
+    """ContratAdherentWsDto → identity fields for ACCOUNT ACTIVATION ONLY.
+
+    Carries CIN + date de naissance — must NEVER be placed in ``system_records``
+    or any payload that reaches an LLM or the chat UI. Consumed exclusively by
+    routers/auth.py to verify a first-login identity claim.
+    """
+    d = _to_dict(dto) or {}
+    person = _g(d, "personnePhysique", "personnePhysiqueDto") or {}
+    if not isinstance(person, dict):
+        person = {}
+    dn = _g(person, "dateNaissance", "dateNaiss")
+    return {
+        "nom": _clean(_g(person, "nom")),
+        "prenom": _clean(_g(person, "prenom")),
+        "nom_complet": _clean(_g(person, "nomComplet")),
+        "date_naissance": str(dn) if dn is not None else None,
+        "cin": _clean(_g(person, "numeroPieceId")),
+        "num_police": _clean(_g(person, "numeroPolice")),
+    }
+
+
+def _map_prestataire(dto: Any) -> dict:
+    """PrestataireDto (searchPsWithConvTP) → compact provider dict.
+
+    Public directory data (conventioned providers) — not personal records.
+    """
+    d = _to_dict(dto) or {}
+    adresse = _g(d, "adresse") or {}
+    if not isinstance(adresse, dict):
+        adresse = {}
+    tel = _clean(_g(d, "numTelFixe")) or _clean(_g(d, "numTelMobile")) or _clean(_g(d, "numTelBureau"))
+    return {
+        "nom": _clean(_g(d, "nom")),
+        "specialite": _clean(_g(d, "specialite")),
+        "secteur": _clean(_g(d, "secteurActivite")),
+        "gouvernorat": _clean(_ref_label(_g(adresse, "gouvernorat"))),
+        "ville": _clean(_ref_label(_g(adresse, "ville"))),
+        "adresse": _clean(_g(adresse, "adresse")),
+        "telephone": tel,
+        # searchPsWithConvTP only returns providers under a tiers-payant convention
+        "conventionne": True,
+    }
+
+
+def _map_plafond(dto: Any) -> dict:
+    """Plafond-per-beneficiary DTO → compact dict (op faults on test data; mapped
+    defensively from the documented fields montantPlafond/Consomme/Disponible)."""
+    d = _to_dict(dto) or {}
+    benef = _g(d, "beneficiaire", "personnePhysique") or {}
+    name = _g(benef, "nomComplet", "nom") if isinstance(benef, dict) else None
+    return {
+        "beneficiaire": _clean(name) or _clean(_g(d, "nomBeneficiaire", "nomBenef", "nomComplet")),
+        "lien": _ref_label(_g(d, "lienParental", "codeCntr")),
+        "montant_plafond": _g(d, "montantPlafond", "mntPlafond", "plafond"),
+        "montant_consomme": _g(d, "montantConsomme", "mntConsomme", "consomme"),
+        "montant_disponible": _g(d, "montantDisponible", "mntDisponible", "disponible"),
+    }
+
+
+def _map_facture(dto: Any) -> dict:
+    """FacturePsDto (huge, loosely populated) → compact invoice dict.
+
+    The row goes through the ``_project_row`` whitelist FIRST so unknown keys
+    (which may hold adherent/PS names) are dropped before any field is plucked.
+    """
+    d = _project_row(_to_dict(dto) or {})
+    if not isinstance(d, dict) or not d:
+        return {}
+    date = _g(d, "dateFacture", "dateCreation", "dateEnvoi")
+    return {
+        "num_facture": _clean(_g(d, "numFacture", "reference", "refFacture", "refFact")),
+        "date": str(date) if date is not None else None,
+        "montant": _g(d, "mntFacture", "montantFacture", "mntTotaleRestPayer"),
+        "statut": _ref_label(_g(d, "statut")) or _clean(_g(d, "etatFacture")),
+        "nature": _clean(_g(d, "natureFacture", "natureActe")),
+    }
+
+
 # ──────────────────────────────────────────────────────────────
 # Public async API — one method per business operation.
 # Each returns compact, JSON-serializable Python ready for system_records.
@@ -424,23 +534,26 @@ async def get_contrat_adherent(matricule: str, num_police: str = "") -> Optional
     return _map_contrat(res) if res is not None else None
 
 
-async def get_beneficiaires(matricule: str) -> list[dict]:
-    """Bénéficiaires — getListeBeneficiairesByMatricule (returns PersonnePhysiqueDto[])."""
+async def get_beneficiaires(matricule: str, num_police: str = "") -> list[dict]:
+    """Bénéficiaires — getListeBeneficiairesByMatricule (returns PersonnePhysiqueDto[]).
+
+    ``numPolice`` is REQUIRED by the live ERP (doc §1.3) — omitting it faults.
+    """
     res = await _call(
         "contrat", "getListeBeneficiairesByMatricule",
-        matricule=matricule,
+        matricule=matricule, numPolice=num_police or None,
     )
     return [_map_beneficiaire(b) for b in _as_list(res)]
 
 
 async def get_list_remboursement(
-    matricule: str, page: int = 0, page_size: int = 20, **filters
+    matricule: str, num_police: str = "", page: int = 0, page_size: int = 20, **filters
 ) -> dict:
     """Liste des remboursements — getListRemboursementByMatricule."""
     res = await _call(
         "remboursement", "getListRemboursementByMatricule",
         matricule=matricule, page=page, pageSize=page_size,
-        numPolice=filters.get("num_police") or None,
+        numPolice=num_police or filters.get("num_police") or None,
         dateDebut=filters.get("date_debut") or None,
         dateFin=filters.get("date_fin") or None,
         statut=filters.get("statut") or None,
@@ -458,17 +571,192 @@ async def get_dossier_remboursement(num_dossier: str) -> Optional[dict]:
 
 
 async def get_list_reclamation(
-    matricule: str, page: int = 0, page_size: int = 20, **filters
+    matricule: str, num_police: str = "", page: int = 0, page_size: int = 20, **filters
 ) -> list[dict]:
     """Liste des réclamations — getListReclamationByMatricule (returns ReclamationDto[])."""
     res = await _call(
         "reclamation", "getListReclamationByMatricule",
         matriculeAdherent=matricule, page=page, pageSize=page_size,
-        numPolice=filters.get("num_police") or None,
+        numPolice=num_police or filters.get("num_police") or None,
         dateMinRec=filters.get("date_min") or None,
         dateMaxRec=filters.get("date_max") or None,
     )
     return [_map_reclamation(r) for r in _as_list(res)]
+
+
+async def get_plafonds_beneficiaires(matricule: str, num_police: str = "") -> list[dict]:
+    """Plafonds/consommation par bénéficiaire — getListPlafondBeneficiairesByMatricule.
+
+    NOTE: faults (code 3) on the current ERP test data — the test adherent has no
+    bénéficiaires. Callers degrade honestly; this is the expected LAN behavior
+    until I-Way provisions an adherent with bénéficiaires.
+    """
+    res = await _call(
+        "contrat", "getListPlafondBeneficiairesByMatricule",
+        matricule=matricule, numPolice=num_police or None,
+    )
+    return [_map_plafond(p) for p in _as_list(res)]
+
+
+async def search_prestataires(
+    nom: str = "",
+    specialite: str = "",
+    gouvernorat: str = "",
+    secteur: str = "",
+    num_police: str = "",
+    max_results: Optional[int] = None,
+) -> list[dict]:
+    """Recherche de PS conventionnés tiers payant — prestatiareWS.searchPsWithConvTP.
+
+    PUBLIC directory data (no personal records). The op can return ~1 MB with
+    loose server-side filtering, so rows are refined client-side (accent-folded
+    substring match on specialite/secteur and gouvernorat/ville) and capped to
+    ``PROVIDER_SEARCH_MAX_RESULTS``. The refinement only applies when it keeps at
+    least one row — if our string matching is too strict, we trust the
+    server-filtered result instead of returning nothing.
+    """
+    res = await _call(
+        "prestataire_search", "searchPsWithConvTP",
+        nom=nom or None,
+        secteurActivite=secteur or None,
+        specialite=specialite or None,
+        gouvernorat=gouvernorat or None,
+        numPolice=num_police or None,
+    )
+    rows = [_map_prestataire(p) for p in _as_list(res)]
+    rows = [r for r in rows if r.get("nom")]
+    if specialite:
+        want = _fold(specialite)
+        kept = [r for r in rows if want in _fold(r.get("specialite")) or want in _fold(r.get("secteur"))]
+        rows = kept or rows
+    if gouvernorat:
+        want = _fold(gouvernorat)
+        kept = [r for r in rows if want in _fold(r.get("gouvernorat")) or want in _fold(r.get("ville"))]
+        rows = kept or rows
+    cap = max_results or settings.PROVIDER_SEARCH_MAX_RESULTS
+    return rows[:cap]
+
+
+async def get_secteurs_activite() -> list[dict]:
+    """Secteurs d'activité PS — rechercheSpecialiteWS.getListSecteurActivitesPS."""
+    res = await _call("recherche_specialite", "getListSecteurActivitesPS")
+    out = []
+    for s in _as_list(res):
+        d = _to_dict(s) or {}
+        label = _clean(_g(d, "libelle", "designation"))
+        if label:
+            out.append({"id": _g(d, "id"), "libelle": label})
+    return out
+
+
+async def get_specialites_by_secteur(id_secteur: int) -> list[dict]:
+    """Spécialités d'un secteur — rechercheSpecialiteWS.getListSpecialiteBySecteurActivite."""
+    res = await _call(
+        "recherche_specialite", "getListSpecialiteBySecteurActivite",
+        idSecteurActivite=id_secteur,
+    )
+    out = []
+    for s in _as_list(res):
+        d = _to_dict(s) or {}
+        label = _clean(_g(d, "libelle", "designation"))
+        if label:
+            out.append({"id": _g(d, "id"), "libelle": label})
+    return out
+
+
+async def get_villes_gouvernorats() -> list[dict]:
+    """Villes par gouvernorat — rechercheSpecialiteWS.getListVilleAndGouvernorat.
+
+    ~1.8 MB live; callers cache the mapped result (see services/referentials.py).
+    Returns [{"gouvernorat": str, "villes": [str, ...]}, ...].
+    """
+    res = await _call("recherche_specialite", "getListVilleAndGouvernorat")
+    out = []
+    for entry in _as_list(res):
+        d = _to_dict(entry) or {}
+        gouv = _clean(_ref_label(_g(d, "parent")))
+        children = _g(d, "listChild") or []
+        if not isinstance(children, list):
+            children = [children]
+        villes = [v for v in (_clean(_ref_label(c)) for c in children) if v]
+        if gouv:
+            out.append({"gouvernorat": gouv, "villes": villes})
+    return out
+
+
+async def search_factures_adherent(
+    matricule: str, num_police: str = "", page: int = 0, page_size: int = 10
+) -> dict:
+    """Factures adhérent — factureWS.searchFacture (returns SearchFacturePsWsDto)."""
+    res = await _call(
+        "facture", "searchFacture",
+        matriculeAdh=matricule, numPolice=num_police or None,
+        page=page, pageSize=page_size,
+    )
+    d = _to_dict(res) or {}
+    rows = _g(d, "facturePs", "factures") or []
+    if not isinstance(rows, list):
+        rows = [rows]
+    factures = [
+        f for f in (_map_facture(x) for x in rows)
+        if f.get("num_facture") or f.get("montant") or f.get("date")
+    ]
+    return {"result_size": _g(d, "nbrTotal", "resultSize"), "factures": factures}
+
+
+async def search_factures_ps(id_tiers: str, page: int = 0, page_size: int = 10) -> dict:
+    """Factures d'un prestataire — facturePsWS.searchListFactureByPs (FacturePsDto[])."""
+    res = await _call(
+        "facture_ps", "searchListFactureByPs",
+        idTiers=int(id_tiers), page=page, pageSize=page_size,
+    )
+    factures = [
+        f for f in (_map_facture(x) for x in _as_list(res))
+        if f.get("num_facture") or f.get("montant") or f.get("date")
+    ]
+    return {"result_size": len(factures), "factures": factures}
+
+
+async def get_contrat_ps_by_matricule_fiscal(matricule_fiscal: str) -> Optional[dict]:
+    """Résolution PS — contratPsWS.getContratPsByMatriculeFiscal → {"id_tiers": str}.
+
+    The live op returns the bare idTiers (e.g. "151537"). AUTH-ONLY usage.
+    """
+    res = await _call(
+        "contrat_ps", "getContratPsByMatriculeFiscal",
+        matriculeFiscal=matricule_fiscal,
+    )
+    if res is None:
+        return None
+    id_tiers = _clean(res if isinstance(res, str) else _g(_to_dict(res) or {}, "idTiers", "id") or str(res))
+    return {"id_tiers": id_tiers} if id_tiers else None
+
+
+async def get_contrat_ps_by_id_tiers(id_tiers: str) -> Optional[dict]:
+    """Identité PS — contratPsWS.getContratPsByIdTiers (ContratPsDto, ~42 KB).
+
+    AUTH-ONLY usage (activation verification). Maps just the identity fields.
+    """
+    res = await _call("contrat_ps", "getContratPsByIdTiers", idTiers=int(id_tiers))
+    if res is None:
+        return None
+    d = _to_dict(res) or {}
+    # the name lives on nested infCompPmDto/personneMorale shapes depending on the
+    # PS type — walk the candidates defensively
+    raison = None
+    for key in ("infCompPmDto", "personneMorale", "tiers"):
+        sub = _g(d, key)
+        if isinstance(sub, dict):
+            raison = _clean(_g(sub, "raisonSociale", "nomContact", "nomComplet"))
+            if raison:
+                break
+    raison = raison or _clean(_g(d, "raisonSociale", "nomContact"))
+    return {
+        "id_contrat": _g(d, "idContrat"),
+        "raison_sociale": raison,
+        "code_cnam": _clean(_g(d, "codeCnam")),
+        "matricule_fiscal": _clean(_g(d, "idFiscal", "matriculeFiscal")),
+    }
 
 
 # ──────────────────────────────────────────────────────────────

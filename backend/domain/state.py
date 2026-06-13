@@ -30,6 +30,7 @@ class ClaimIntent(str, Enum):
     CLAIM_ACTION = "claim_action"       # "Submit my reimbursement"
     ESCALATION = "escalation"           # "I want a human" / anger detected
     PERSONAL_LOOKUP = "personal_lookup" # "Show me my dossiers"
+    PROVIDER_SEARCH = "provider_search" # "Find a cardiologist in Sousse" (public directory)
     SMALL_TALK = "small_talk"           # Greetings, thanks, small talk
 
 
@@ -136,6 +137,9 @@ class ClaimsGraphState(TypedDict):
     # ── Security (injected, never sent to LLM) ────────────────
     matricule: str
     token: str
+    num_police: str   # adherent policy number — REQUIRED by real-mode SOAP lookups
+    role: str         # Adherent | Prestataire | Agent | Admin — drives role-aware lookups
+    id_tiers: str     # prestataire ERP id (empty for adherents)
 
     # ── Intent Classification ─────────────────────────────────
     intent: Optional[ClaimIntent]

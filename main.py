@@ -94,6 +94,10 @@ async def lifespan(app: FastAPI):
     logger.info("🧠 Initializing Claims StateGraph...")
     await init_claims_graph_async()
 
+    # --- Additive schema migrations (init.sql only runs on FRESH volumes) ---
+    from backend.database.migrations import run_startup_migrations
+    await run_startup_migrations()
+
     # --- Restore ALL non-resolved sessions from PostgreSQL ---
     # Without this, an API restart silently emptied the agent escalation queue:
     # handoff_pending users stayed stranded until they sent another message.
@@ -317,7 +321,7 @@ async def _ws_authenticate(websocket: WebSocket, token: str | None, require_role
     Returns {"matricule", "role"} on success; closes the socket and returns None
     on failure. The socket is ACCEPTED either way (callers must not re-accept).
     """
-    from backend.routers.auth import verify_jwt, MOCK_USERS
+    from backend.routers.auth import verify_jwt
 
     await websocket.accept()
 
@@ -340,8 +344,9 @@ async def _ws_authenticate(websocket: WebSocket, token: str | None, require_role
         return None
 
     matricule = payload.get("sub")
-    user = MOCK_USERS.get(matricule, {})
-    role = user.get("role", "Adherent")
+    # Role rides in the VERIFIED token (set at login) — works for demo personas
+    # AND activated ERP users without a per-connection DB lookup.
+    role = payload.get("role") or "Adherent"
     if require_roles and role not in require_roles:
         await websocket.close(code=4003)
         logger.warning(f"⛔ WebSocket rejected: role '{role}' not authorized")

@@ -225,7 +225,7 @@ async def save_knowledge(
     Only 'general' and 'procedural' pairs are accepted.
     """
     from backend.routers.sessions import SESSIONS
-    from backend.routers.auth import MOCK_USERS
+    from backend.routers.auth import resolve_user
     from backend.services.rag_service import async_add_hitl_knowledge
 
     session = SESSIONS.get(body.session_id)
@@ -250,7 +250,7 @@ async def save_knowledge(
         }
 
     # Get agent info
-    user = MOCK_USERS.get(matricule, {})
+    user = await resolve_user(matricule) or {}
     agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip() or "Agent"
 
     saved_pairs = []

@@ -14,9 +14,12 @@ import re
 from typing import Optional
 
 # Tools whose presence means the response contains PER-USER data.
+# NOTE: "provider_search" is DELIBERATELY absent — the conventioned-provider
+# directory is public data shared by all users, so those answers may be cached.
 _PERSONAL_TOOLS = {
     "dossier_lookup", "beneficiary_lookup",
     "reclamation_lookup", "dossier_detail_lookup",
+    "facture_lookup", "plafond_lookup",
 }
 
 # Response sources trusted enough to cache.
@@ -53,7 +56,7 @@ _PERSONAL_QUERY_RE = re.compile(r"\b(mes|mon|ma|miens?|miennes?)\b", re.IGNORECA
 # ("affiche les remboursements", "liste les bénéficiaires").
 _PERSONAL_IMPERATIVE_RE = re.compile(
     r"\b(affiche[rz]?|liste[rz]?|montre[rz]?|consulte[rz]?|voir)\b"
-    r".{0,40}?\b(dossiers?|remboursements?|b[ée]n[ée]ficiaires?|r[ée]clamations?|contrats?|historique)",
+    r".{0,40}?\b(dossiers?|remboursements?|b[ée]n[ée]ficiaires?|r[ée]clamations?|contrats?|historique|factures?|plafonds?|consommation)",
     re.IGNORECASE | re.DOTALL,
 )
 

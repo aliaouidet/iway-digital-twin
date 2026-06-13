@@ -33,9 +33,62 @@ from backend.database.models import (
     EscalationPriority,
     CorrectionType,
     SourceType,
+    User,
+    UserRole,
 )
 
 logger = logging.getLogger("I-Way-Twin")
+
+
+# ==============================================================
+# USERS (real-ERP activation — routers/auth.py)
+# ==============================================================
+
+async def get_user(db: AsyncSession, matricule: str) -> Optional[User]:
+    """Fetch a user row by matricule (demo personas AND activated ERP users)."""
+    result = await db.execute(select(User).where(User.matricule == matricule))
+    return result.scalar_one_or_none()
+
+
+async def upsert_activated_user(
+    db: AsyncSession,
+    matricule: str,
+    nom: str,
+    prenom: str,
+    role: str,
+    password_hash: str,
+    num_police: Optional[str] = None,
+    id_tiers: Optional[str] = None,
+) -> User:
+    """Create (or re-activate) an ERP-verified user with a local password.
+
+    Re-running activation for an existing matricule resets the password — the
+    identity was just re-verified against the ERP, so this doubles as the
+    password-reset path.
+    """
+    user = await get_user(db, matricule)
+    if user is None:
+        user = User(matricule=matricule)
+        db.add(user)
+    user.nom = nom or user.nom or matricule
+    user.prenom = prenom or user.prenom or ""
+    user.role = UserRole(role)
+    user.password_hash = password_hash
+    user.num_police = num_police or user.num_police
+    user.id_tiers = id_tiers or user.id_tiers
+    user.source = "erp"
+    await db.flush()
+    logger.info(f"💾 Activated ERP user {matricule} (role={role})")
+    return user
+
+
+async def touch_last_login(db: AsyncSession, matricule: str) -> None:
+    """Record a successful login timestamp (best-effort)."""
+    await db.execute(
+        update(User)
+        .where(User.matricule == matricule)
+        .values(last_login=datetime.now(timezone.utc))
+    )
 
 
 # ==============================================================

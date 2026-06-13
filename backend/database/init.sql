@@ -28,7 +28,12 @@ CREATE TABLE users (
     email           VARCHAR(255),
     specialite      VARCHAR(100),
     password_hash   VARCHAR(255) NOT NULL,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    -- Real-ERP identity (activation flow — routers/auth.py /auth/activate)
+    num_police      VARCHAR(30),
+    id_tiers        VARCHAR(30),
+    source          VARCHAR(10) NOT NULL DEFAULT 'mock',  -- 'mock' | 'erp'
+    last_login      TIMESTAMPTZ
 );
 
 -- ============================================================

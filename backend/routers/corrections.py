@@ -14,7 +14,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend.routers.auth import get_current_user, require_role, MOCK_USERS
+from backend.routers.auth import get_current_user, require_role, resolve_user
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -41,7 +41,7 @@ async def flag_ai_correction(data: CorrectionInput, matricule: str = Depends(req
     This creates a correction record and fires an admin alert.
     The incorrect answer is NEVER added to the knowledge base.
     """
-    user = MOCK_USERS.get(matricule, {})
+    user = await resolve_user(matricule) or {}
     agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip()
 
     correction = {

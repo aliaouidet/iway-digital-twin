@@ -3,6 +3,15 @@ export interface LoginRequest {
   password: string;
 }
 
+/** First-login activation (real-ERP mode): identity verified against I-Way. */
+export interface ActivateRequest {
+  matricule: string;
+  num_police: string;
+  date_naissance?: string; // YYYY-MM-DD
+  cin?: string;
+  new_password: string;
+}
+
 export type UserRole = 'Adherent' | 'Prestataire' | 'Agent' | 'Admin';
 
 export interface User {

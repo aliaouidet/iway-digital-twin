@@ -34,6 +34,15 @@ _BENEFICIARY_KEYWORDS = [
     "couvert", "ayant", "dependant", "dépendant", "membres",
 ]
 
+_FACTURE_KEYWORDS = [
+    "facture", "factures", "facturation",
+]
+
+_PLAFOND_KEYWORDS = [
+    "plafond", "plafonds", "consommation", "consommé", "consomme",
+    "disponible", "solde restant", "montant restant",
+]
+
 # Signals that the user wants ONE specific dossier (→ detail), not the list.
 _DETAIL_KEYWORDS = [
     "detail", "détail", "details", "détails", "dossier", "statut", "suivi",
@@ -57,15 +66,29 @@ def extract_dossier_number(message: str) -> Optional[str]:
 
 def classify_personal_lookup(
     message: str,
-) -> Literal["reclamation_lookup", "dossier_detail_lookup", "beneficiary_lookup", "dossier_lookup"]:
+) -> Literal[
+    "reclamation_lookup", "facture_lookup", "plafond_lookup",
+    "dossier_detail_lookup", "beneficiary_lookup", "dossier_lookup",
+]:
     """Pick the personal-lookup handler for a message (deterministic).
 
-    Priority: réclamations → specific-dossier detail → bénéficiaires → dossier list.
+    Priority: réclamations → factures → plafonds/consommation →
+    specific-dossier detail → bénéficiaires → dossier list.
+
+    Note: GENERAL plafond questions ("quel est le plafond dentaire ?") classify
+    as info_query at the intent level and never reach this function — only
+    possessive/personal phrasings ("mon plafond restant") land here.
     """
     msg = (message or "").lower()
 
     if any(kw in msg for kw in _RECLAMATION_KEYWORDS):
         return "reclamation_lookup"
+
+    if any(kw in msg for kw in _FACTURE_KEYWORDS):
+        return "facture_lookup"
+
+    if any(kw in msg for kw in _PLAFOND_KEYWORDS):
+        return "plafond_lookup"
 
     # A specific dossier number + a "detail/dossier/statut" cue → single-dossier detail.
     if any(kw in msg for kw in _DETAIL_KEYWORDS) and extract_dossier_number(message):
@@ -97,9 +120,9 @@ def pre_intake_router(
 
 def route_by_intent(
     state: ClaimsGraphState,
-) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "draft_response"]:
+) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "provider_search", "draft_response"]:
     """
-    Conditional edge after intake_node (5-way branch).
+    Conditional edge after intake_node (6-way branch).
 
     Routes the claim to the appropriate processing path based on
     the classified intent.
@@ -112,6 +135,8 @@ def route_by_intent(
         return "claim_extraction"
     elif intent == ClaimIntent.PERSONAL_LOOKUP:
         return "action_router"
+    elif intent == ClaimIntent.PROVIDER_SEARCH:
+        return "provider_search"
     elif intent == ClaimIntent.SMALL_TALK:
         return "draft_response"
     else:
@@ -121,7 +146,7 @@ def route_by_intent(
 
 def route_after_decompose(
     state: ClaimsGraphState,
-) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "draft_response", "multi_executor"]:
+) -> Literal["rag_retrieval", "claim_extraction", "escalation", "action_router", "provider_search", "draft_response", "multi_executor"]:
     """
     Conditional edge after decompose_node (opt-in multi-intent).
 
@@ -150,12 +175,16 @@ def route_after_decompose(
 
 def route_action(
     state: ClaimsGraphState,
-) -> Literal["dossier_lookup", "beneficiary_lookup", "reclamation_lookup", "dossier_detail_lookup"]:
+) -> Literal[
+    "dossier_lookup", "beneficiary_lookup", "reclamation_lookup",
+    "dossier_detail_lookup", "facture_lookup", "plafond_lookup",
+]:
     """
-    Conditional edge after action_router_node (4-way branch).
+    Conditional edge after action_router_node (6-way branch).
 
     Deterministic keyword/number routing of a PERSONAL_LOOKUP to the right
-    handler: dossier list, single-dossier detail, beneficiaries, or réclamations.
+    handler: dossier list, single-dossier detail, beneficiaries, réclamations,
+    factures, or plafonds/consommation.
     """
     target = classify_personal_lookup(state["messages"][-1].content)
     logger.info(f"Action route -> {target}")

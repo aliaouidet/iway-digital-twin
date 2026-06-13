@@ -397,6 +397,57 @@ interface ChatThread {
                       <div *ngIf="c.statut" class="flex justify-between"><span class="text-slate-400 dark:text-slate-500">Statut</span><span>{{c.statut}}</span></div>
                     </div>
                   </div>
+
+                  <!-- Prestataires conventionnés (annuaire public) -->
+                  <div *ngFor="let p of r.prestataires" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-xs font-bold text-slate-800 dark:text-white truncate">{{p.nom}}</span>
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex-shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Conventionné</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span *ngIf="p.specialite || p.secteur" class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 font-medium flex-shrink-0">{{p.specialite || p.secteur}}</span>
+                      <span class="truncate">{{placeLabel(p)}}</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span class="truncate">{{p.adresse}}</span>
+                      <span *ngIf="p.telephone" class="font-mono font-semibold text-slate-600 dark:text-slate-300 flex-shrink-0">☎ {{p.telephone}}</span>
+                    </div>
+                  </div>
+
+                  <!-- Précision requise (recherche trop large) -->
+                  <div *ngIf="r.precision_requise" class="rounded-xl border px-3 py-2.5 text-xs flex items-start gap-2 bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:text-indigo-300">
+                    <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
+                    <span>{{r.precision_requise}}</span>
+                  </div>
+
+                  <!-- Factures -->
+                  <div *ngIf="r.factures?.length" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Factures ({{r.factures.length}})</div>
+                    <div *ngFor="let f of r.factures" class="py-1.5 border-b last:border-0 border-slate-100 dark:border-slate-700/50">
+                      <div class="flex items-center justify-between gap-2 text-xs">
+                        <span class="font-mono font-bold text-slate-800 dark:text-white truncate">{{f.num_facture || 'Facture'}}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex-shrink-0" [class]="reclStatusClass(f.statut)">{{f.statut || 'En cours'}}</span>
+                      </div>
+                      <div class="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        <span class="truncate">{{f.nature || 'Facture'}}<ng-container *ngIf="f.date"> · {{f.date}}</ng-container></span>
+                        <span *ngIf="f.montant != null" class="font-semibold text-slate-700 dark:text-slate-200 flex-shrink-0">{{f.montant}} TND</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Plafonds par bénéficiaire -->
+                  <div *ngIf="r.plafonds?.length" class="rounded-xl border p-3 bg-white border-slate-200 shadow-sm dark:bg-slate-800/60 dark:border-slate-700">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Plafonds &amp; consommation</div>
+                    <div *ngFor="let pl of r.plafonds" class="py-1.5 border-b last:border-0 border-slate-100 dark:border-slate-700/50">
+                      <div class="flex items-center justify-between gap-2 text-xs mb-1">
+                        <span class="text-slate-700 dark:text-slate-200 truncate">{{pl.beneficiaire || 'Bénéficiaire'}}<span *ngIf="pl.lien" class="text-slate-400 dark:text-slate-500 capitalize"> · {{pl.lien}}</span></span>
+                        <span class="font-semibold text-slate-700 dark:text-slate-200 flex-shrink-0">{{pl.montant_consomme || 0}} / {{pl.montant_plafond}} TND</span>
+                      </div>
+                      <div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                        <div class="h-full rounded-full transition-all bg-gradient-to-r from-indigo-500 to-emerald-500" [style.width.%]="plafondRowPct(pl)"></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <span *ngIf="msg.timestamp && !msg.isStreaming" class="block text-[10px] text-slate-400 dark:text-slate-600 mt-1 ml-1">{{formatTime(msg.timestamp)}}</span>
@@ -1061,6 +1112,22 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     const used = Number(r?.total_rembourse_2026) || 0;
     if (!plafond) return 0;
     return Math.max(0, Math.min(100, Math.round((used / plafond) * 100)));
+  }
+
+  /** Per-beneficiary plafond bar (plafond_lookup records). */
+  plafondRowPct(pl: any): number {
+    const plafond = Number(pl?.montant_plafond) || 0;
+    const used = Number(pl?.montant_consomme) || 0;
+    if (!plafond) return 0;
+    return Math.max(0, Math.min(100, Math.round((used / plafond) * 100)));
+  }
+
+  /** "Ville · Gouvernorat" without repeating identical values. */
+  placeLabel(p: any): string {
+    const parts = [p?.ville, p?.gouvernorat]
+      .filter(v => !!v)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+    return parts.join(' · ');
   }
 
   requestHandoff(): void {

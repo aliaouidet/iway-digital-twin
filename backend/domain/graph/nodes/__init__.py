@@ -9,8 +9,11 @@ from backend.domain.graph.nodes.lookups import (
     beneficiary_lookup_node,
     reclamation_lookup_node,
     dossier_detail_lookup_node,
+    plafond_lookup_node,
+    facture_lookup_node,
     action_router_node,
 )
+from backend.domain.graph.nodes.provider_search import provider_search_node
 from backend.domain.graph.nodes.respond import respond_node
 from backend.domain.graph.nodes.multi_executor import multi_executor_node
 from backend.domain.graph.nodes.draft_response import draft_response_node
@@ -29,6 +32,9 @@ __all__ = [
     "beneficiary_lookup_node",
     "reclamation_lookup_node",
     "dossier_detail_lookup_node",
+    "plafond_lookup_node",
+    "facture_lookup_node",
+    "provider_search_node",
     "action_router_node",
     "multi_executor_node",
     "draft_response_node",

@@ -193,7 +193,10 @@ async def get_knowledge_base():
 @router.get("/me", tags=["Profile"])
 async def get_me(matricule: str = Depends(get_current_user)):
     """Récupère les informations d'identité de l'utilisateur connecté."""
-    user = MOCK_USERS[matricule]
+    from backend.routers.auth import resolve_user
+    user = await resolve_user(matricule)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     return {k: v for k, v in user.items() if k != "password_hash"}
 
 
