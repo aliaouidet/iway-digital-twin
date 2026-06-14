@@ -598,7 +598,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                       <div class="flex items-center gap-2 flex-shrink-0">
                         <span *ngIf="d.montant != null" class="text-slate-500 dark:text-slate-400">{{d.montant}} TND</span>
                         <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
-                          [class]="d.status === 'rembourse' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">{{d.status}}</span>
+                          [class]="d.status === 'rembourse' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'">{{prettyStatus(d.status)}}</span>
                       </div>
                     </div>
                   </div>
@@ -1388,6 +1388,17 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
   }
 
   trackBySession = (_: number, item: QueueItem) => item.id;
+
+  /** Humanize a raw dossier status code ("en_cours"/"rembourse") for display. */
+  prettyStatus(s: string): string {
+    const map: Record<string, string> = {
+      rembourse: 'Remboursé', remboursé: 'Remboursé',
+      en_cours: 'En cours', encours: 'En cours',
+      rejete: 'Rejeté', rejeté: 'Rejeté', regle: 'Réglé',
+    };
+    const key = (s || '').toLowerCase();
+    return map[key] || (s || '').replace(/_/g, ' ');
+  }
 
   /** Toggle opt-in alerts; requests desktop-notification permission on enable. */
   toggleAlerts(): void {

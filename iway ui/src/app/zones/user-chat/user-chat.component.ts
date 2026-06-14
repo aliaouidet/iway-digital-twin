@@ -735,6 +735,7 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     else if (r.factures?.length) chips.push('Mes remboursements');
     else if (r.plafonds?.length) chips.push('Mes dossiers');
     else if (r.reclamations?.length) chips.push('Suivre ma réclamation');
+    else if (r.beneficiaires?.length) chips.push('Mes plafonds', 'Mes remboursements');
     else if (r.contrat) chips.push('Mes bénéficiaires', 'Mes remboursements');
     if (chips.length < 3 && !this.isHandoffPending()) chips.push('Parler à un agent');
     return chips.slice(0, 3);

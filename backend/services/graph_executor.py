@@ -133,6 +133,13 @@ async def execute_claims_graph(
         "role": session.get("user_role", ""),
         "id_tiers": session.get("user_id_tiers", ""),
         "claim_status": _map_session_to_claim_status(session),
+        # Reset per-turn lookup outputs. The checkpointer persists state across
+        # turns on this thread_id; without this, a turn that runs NO lookup
+        # (e.g. "parler à un agent", "merci") would inherit the previous turn's
+        # system_records + tools_called and the UI would re-render a stale claim
+        # card (and the cache-policy would mis-tag the turn as personal).
+        "system_records": None,
+        "tools_called": [],
     }
 
     # Thread ID: matricule + session_id for per-user, per-session isolation
