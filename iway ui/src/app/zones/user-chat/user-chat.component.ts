@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, ViewChild, ElementRef, AfterViewChecked, HostListener } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, ViewChild, ElementRef, AfterViewChecked, HostListener } from '@angular/core';
 import { trigger, state, style, transition, animate } from '@angular/animations';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -715,8 +715,16 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.scrollToBottom();
   }
 
-  /** Context-aware follow-up chips derived from the last AI answer's records. */
-  suggestedChips(): string[] {
+  /** Context-aware follow-up chips derived from the last AI answer's records.
+   *  computed() → evaluated once per dependency change (not per change-detection
+   *  pass) and returns a stable array reference, so the *ngFor doesn't rebuild
+   *  every cycle.
+   *
+   *  SAFETY: chips must only ever be READ-ONLY/navigational prompts. Never offer
+   *  a phrase that satisfies the escalation filing gate (wants_formal_complaint),
+   *  or one click would file a real réclamation (a non-idempotent ERP write) with
+   *  no description — hence "Suivre ma réclamation" (status lookup), not "Déposer…". */
+  suggestedChips = computed<string[]>(() => {
     const msgs = this.messages();
     const last = msgs[msgs.length - 1];
     if (!last || last.role !== 'assistant' || last.isStreaming) return [];
@@ -726,11 +734,11 @@ export class UserChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     else if (r.prestataires?.length) chips.push('Une autre spécialité', 'Dans une autre ville');
     else if (r.factures?.length) chips.push('Mes remboursements');
     else if (r.plafonds?.length) chips.push('Mes dossiers');
-    else if (r.reclamations?.length) chips.push('Déposer une réclamation');
+    else if (r.reclamations?.length) chips.push('Suivre ma réclamation');
     else if (r.contrat) chips.push('Mes bénéficiaires', 'Mes remboursements');
     if (chips.length < 3 && !this.isHandoffPending()) chips.push('Parler à un agent');
     return chips.slice(0, 3);
-  }
+  });
 
   sendChip(text: string): void {
     this.newMessage = text;

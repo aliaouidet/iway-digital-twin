@@ -1615,5 +1615,6 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     if (this.clockTimer) clearInterval(this.clockTimer);
     clearTimeout(this.clientTypingTimer);
     clearTimeout(this.agentTypingStopTimer);
+    if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
   }
 }
