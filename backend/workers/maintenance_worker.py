@@ -65,6 +65,39 @@ def prune_old_checkpoints(retention_days: int = None):
         return {"status": "error", "error": str(e)}
 
 
+@celery_app.task(name="backend.workers.maintenance_worker.expire_stale_sessions")
+def expire_stale_sessions(retention_days: int = None):
+    """Auto-expire unresolved sessions older than the retention window.
+
+    Sessions that were escalated (or left active) and never resolved otherwise
+    linger forever: hydrate_all_sessions() reloads them on every restart, so the
+    agent queue and the dashboard's open_tickets count keep inflating with stale
+    demo/abandoned conversations. Marking them 'expired' drops them out of
+    get_active_sessions() (which excludes EXPIRED) without deleting any history.
+    """
+    days = settings.STALE_SESSION_DAYS if retention_days is None else retention_days
+    try:
+        conn = _pg_conn()
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE sessions
+                SET status = 'expired'
+                WHERE status IN ('active', 'handoff_pending', 'agent_connected')
+                  AND created_at < NOW() - INTERVAL '%s days'
+                """,
+                (days,),
+            )
+            expired = cur.rowcount
+        conn.close()
+        logger.info(f"[Maintenance] Expired {expired} stale session(s) (> {days}d unresolved)")
+        return {"status": "ok", "expired": expired, "retention_days": days}
+    except Exception as e:
+        logger.warning(f"[Maintenance] Stale-session expiry failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
 @celery_app.task(name="backend.workers.maintenance_worker.reembed_knowledge_base", time_limit=3600, soft_time_limit=3300)
 def reembed_knowledge_base(batch_size: int = 100):
     """Re-embed every pgvector row with the current embedding model.
@@ -83,7 +116,7 @@ def reembed_knowledge_base(batch_size: int = 100):
     try:
         conn = _pg_conn()
         with conn.cursor() as cur:
-            cur.execute("SELECT id, document FROM langchain_pg_embedding")
+            cur.execute("SELECT uuid, document FROM langchain_pg_embedding")
             rows = cur.fetchall()
 
         for i in range(0, len(rows), batch_size):
@@ -97,7 +130,7 @@ def reembed_knowledge_base(batch_size: int = 100):
                         SET embedding = %s::vector,
                             cmetadata = COALESCE(cmetadata, '{}'::jsonb)
                                         || %s::jsonb
-                        WHERE id = %s
+                        WHERE uuid = %s
                         """,
                         (str(vec), _json.dumps({"embedding_model": model, "embedded_at": stamped_at}), _id),
                     )

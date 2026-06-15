@@ -10,6 +10,7 @@ Routes:
 """
 
 import logging
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -96,6 +97,36 @@ async def get_metrics(
     human_escalated = outcomes.get("HUMAN_ESCALATED", 0)
     errors = outcomes.get("ERROR", 0)
 
+    # ── Period-over-period comparison (previous equal-length window) ──
+    # Only meaningful when a bounded range is active; "All Time" has no "before".
+    # Lets the dashboard show ▲/▼ deltas vs the immediately preceding window.
+    comparison = None
+    if start_date and end_date:
+        try:
+            s = datetime.strptime(start_date, "%Y-%m-%d").date()
+            e = datetime.strptime(end_date, "%Y-%m-%d").date()
+            window = (e - s).days + 1
+            if window >= 1:
+                prev_end = s - timedelta(days=1)
+                prev_start = prev_end - timedelta(days=window - 1)
+                prev = await get_audit_stats(
+                    db, start_date=prev_start.isoformat(), end_date=prev_end.isoformat()
+                )
+                p_total = prev.get("total_traces", 0)
+                p_out = prev.get("outcomes", {})
+                p_rag = p_out.get("RAG_RESOLVED", 0) + p_out.get("GRAPH_RESOLVED", 0)
+                p_human = p_out.get("HUMAN_ESCALATED", 0)
+                comparison = {
+                    "total_requests": p_total,
+                    "rag_success_rate": round(p_rag / max(p_total, 1) * 100, 1),
+                    "escalation_rate": round(p_human / max(p_total, 1) * 100, 1),
+                    "avg_confidence": prev.get("avg_confidence", 0),
+                    "avg_response_time_ms": prev.get("avg_latency_ms", 0),
+                    "window_days": window,
+                }
+        except (ValueError, TypeError):
+            comparison = None
+
     return {
         "total_requests": total,
         "rag_resolved": rag_resolved,
@@ -114,6 +145,7 @@ async def get_metrics(
         "degraded_rate": 0,
         "open_tickets": open_tickets,
         "time_series": time_series,
+        "comparison": comparison,
     }
 
 
@@ -137,6 +169,8 @@ async def get_logs(
     user_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     min_similarity: Optional[float] = Query(None, ge=0, le=1),
+    start_date: Optional[str] = Query(None, description="Start date filter (yyyy-MM-dd)"),
+    end_date: Optional[str] = Query(None, description="End date filter (yyyy-MM-dd)"),
     matricule: str = Depends(get_current_user),
 ):
     """Paginated system logs from PostgreSQL."""
@@ -203,6 +237,11 @@ async def get_logs(
         logs = [l for l in logs if q in l["query"].lower() or q in l["user_id"].lower()]
     if min_similarity is not None:
         logs = [l for l in logs if l["top_similarity"] >= min_similarity]
+    # ISO timestamps sort lexically, so a yyyy-MM-dd prefix compare is enough.
+    if start_date:
+        logs = [l for l in logs if l["timestamp"] and l["timestamp"][:10] >= start_date]
+    if end_date:
+        logs = [l for l in logs if l["timestamp"] and l["timestamp"][:10] <= end_date]
 
     total = len(logs)
     start = (page - 1) * page_size

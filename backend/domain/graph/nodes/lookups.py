@@ -72,9 +72,9 @@ def _mock_dossiers() -> dict:
 def _mock_beneficiaries() -> dict:
     return {
         "beneficiaires": [
-            {"nom": "Ahmed Tounsi", "lien": "titulaire", "date_naissance": "1985-06-12", "couverture_active": True},
-            {"nom": "Fatma Tounsi", "lien": "conjoint", "date_naissance": "1988-03-22", "couverture_active": True},
-            {"nom": "Youssef Tounsi", "lien": "enfant", "date_naissance": "2015-11-05", "couverture_active": True},
+            {"nom": "Ahmed Tounsi", "lien": "titulaire", "date_naissance": "12/06/1985", "couverture_active": True},
+            {"nom": "Fatma Tounsi", "lien": "conjoint", "date_naissance": "22/03/1988", "couverture_active": True},
+            {"nom": "Youssef Tounsi", "lien": "enfant", "date_naissance": "05/11/2015", "couverture_active": True},
         ],
         "nombre_beneficiaires": 3,
     }

@@ -9,15 +9,22 @@ Routes:
   POST /api/v1/knowledge/save-knowledge    — Save approved pairs to RAG
 """
 
+import json
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.routers.auth import get_current_user, require_role
+from backend.database.connection import get_db
 from backend.services.rag_service import async_retrieve_context, get_knowledge_stats
+from backend.services.pii_guard import redact_identifiers
 
 logger = logging.getLogger("I-Way-Twin")
 
@@ -226,7 +233,7 @@ async def save_knowledge(
     """
     from backend.routers.sessions import SESSIONS
     from backend.routers.auth import resolve_user
-    from backend.services.rag_service import async_add_hitl_knowledge
+    from backend.services.rag_service import async_add_hitl_with_dedup
 
     session = SESSIONS.get(body.session_id)
     if not session:
@@ -256,13 +263,14 @@ async def save_knowledge(
     saved_pairs = []
     for pair in safe_pairs:
         try:
-            result = await async_add_hitl_knowledge(
+            result = await async_add_hitl_with_dedup(
                 session_id=body.session_id,
-                question=pair.question,
-                answer=pair.answer,
+                question=redact_identifiers(pair.question),
+                answer=redact_identifiers(pair.answer),
                 agent_matricule=matricule,
                 agent_name=agent_name,
                 tags=[pair.topic, pair.knowledge_type],
+                origin="resolve",
             )
             saved_pairs.append({
                 "question": pair.question,
@@ -283,4 +291,243 @@ async def save_knowledge(
         "rejected": rejected_count,
         "pairs": saved_pairs,
     }
+
+
+class CreateArticleInput(BaseModel):
+    """A KB article authored directly (e.g. from an AI-Insights knowledge gap)."""
+    question: str = Field(min_length=3, description="Searchable question a user would ask")
+    answer: str = Field(min_length=3, description="Canonical answer in professional French")
+    topic: str = Field(default="Insights", description="Topic/category label")
+
+
+@router.post("/articles")
+async def create_article(
+    body: CreateArticleInput,
+    matricule: str = Depends(require_role("Agent", "Admin")),
+):
+    """Author a single general KB article directly (no chat session required).
+
+    Backs the AI-Insights "Create KB article" action: an admin turns a recurring
+    knowledge gap into a permanent answer. Reuses async_add_hitl_knowledge with a
+    synthetic source id so the entry is auditable like any HITL contribution.
+    """
+    from backend.routers.auth import resolve_user
+    from backend.services.rag_service import async_add_hitl_with_dedup
+
+    user = await resolve_user(matricule) or {}
+    agent_name = f"{user.get('prenom', '')} {user.get('nom', '')}".strip() or "Admin"
+
+    try:
+        result = await async_add_hitl_with_dedup(
+            session_id="insights-manual",
+            question=redact_identifiers(body.question.strip()),
+            answer=redact_identifiers(body.answer.strip()),
+            agent_matricule=matricule,
+            agent_name=agent_name,
+            tags=[body.topic, "general"],
+            origin="insights",
+        )
+        logger.info(f"📚 KB article created from Insights by {matricule}: Q='{body.question[:50]}'")
+        return {"status": "saved", "question": body.question, "topic": body.topic, "result": result}
+    except Exception as e:
+        logger.error(f"❌ Failed to create KB article: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save the article.")
+
+
+# ── Governance: HITL entry CRUD (admin curation) ──────────────
+# Operates on langchain_pg_embedding filtered to hitl_validated — the same table
+# reembed_knowledge_base maintains via raw SQL. CAST() is used (not ::) so the
+# `:` never collides with SQLAlchemy bindparams, and CAST(id AS text) works
+# whether the PK column is uuid or varchar across PGVector versions.
+
+class EntryUpdate(BaseModel):
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class ConflictResolution(BaseModel):
+    action: Literal["accept", "reject"]
+
+
+def _entry_row_to_dict(row) -> dict:
+    rid, document, meta = row
+    meta = meta or {}
+    return {
+        "id": str(rid),
+        "source_id": meta.get("source_id"),
+        "question": meta.get("question") or document,
+        "answer": meta.get("reponse"),
+        "tags": meta.get("tags", []),
+        "origin": meta.get("origin", "resolve"),
+        "status": meta.get("status", "active"),
+        "agent_name": meta.get("agent_name"),
+        "created_at": meta.get("created_at") or meta.get("validated_at"),
+        "updated_at": meta.get("updated_at"),
+        "conflicts_with": meta.get("conflicts_with"),
+    }
+
+
+@router.get("/health")
+async def kb_health(
+    db: AsyncSession = Depends(get_db),
+    matricule: str = Depends(require_role("Agent", "Admin")),
+):
+    """KB-health snapshot (counts by lifecycle status) for the curation dashboard."""
+    try:
+        rows = (await db.execute(text(
+            "SELECT COALESCE(cmetadata->>'status','active') AS st, COUNT(*) "
+            "FROM langchain_pg_embedding "
+            "WHERE cmetadata->>'source_type' = 'hitl_validated' GROUP BY 1"
+        ))).fetchall()
+    except Exception as e:
+        logger.warning(f"KB health failed (PGVector unavailable?): {e}")
+        return {"total": 0, "by_status": {}}
+    by_status = {(r[0] or "active"): int(r[1]) for r in rows}
+    return {
+        "total": sum(by_status.values()),
+        "active": by_status.get("active", 0),
+        "conflict": by_status.get("conflict", 0),
+        "retired": by_status.get("retired", 0),
+        "needs_review": by_status.get("needs_review", 0),
+        "by_status": by_status,
+    }
+
+
+@router.get("/entries")
+async def list_entries(
+    db: AsyncSession = Depends(get_db),
+    status: Optional[str] = Query(None),
+    matricule: str = Depends(require_role("Agent", "Admin")),
+):
+    """List HITL knowledge entries with provenance + usage stats (curation view)."""
+    from backend.services import kb_feedback
+    try:
+        rows = (await db.execute(text(
+            "SELECT uuid, document, cmetadata FROM langchain_pg_embedding "
+            "WHERE cmetadata->>'source_type' = 'hitl_validated' "
+            "ORDER BY cmetadata->>'created_at' DESC NULLS LAST LIMIT 500"
+        ))).fetchall()
+    except Exception as e:
+        logger.warning(f"KB entries list failed (PGVector unavailable?): {e}")
+        return {"entries": [], "total": 0}
+
+    entries = [_entry_row_to_dict(r) for r in rows]
+    if status:
+        entries = [e for e in entries if e["status"] == status]
+    # One concurrent batch of per-entry usage stats, not N serial Redis reads.
+    targeted = [e for e in entries if e.get("source_id")]
+    stats = await asyncio.gather(*(kb_feedback.get_stats_async(e["source_id"]) for e in targeted))
+    for e, s in zip(targeted, stats):
+        e["usage"] = s
+    return {"entries": entries, "total": len(entries)}
+
+
+@router.put("/entries/{entry_id}")
+async def update_entry(
+    entry_id: str, body: EntryUpdate,
+    db: AsyncSession = Depends(get_db),
+    matricule: str = Depends(require_role("Admin")),
+):
+    """Edit a HITL entry — updates the document + metadata and re-embeds the vector."""
+    from backend.services.rag_service import async_embed_text
+    row = (await db.execute(text(
+        "SELECT cmetadata FROM langchain_pg_embedding WHERE CAST(uuid AS text) = :id"
+    ), {"id": entry_id})).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    meta = row[0] or {}
+    question = redact_identifiers(body.question) if body.question is not None else meta.get("question", "")
+    answer = redact_identifiers(body.answer) if body.answer is not None else meta.get("reponse", "")
+    document = f"Question: {question}\nRéponse: {answer}"
+    vector = await async_embed_text(document)
+
+    # jsonb_set only the changed keys (not a full cmetadata replace) so a
+    # concurrent status change — e.g. resolve-conflict — is never clobbered.
+    updates = {
+        "question": question,
+        "reponse": answer,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if body.tags is not None:
+        updates["tags"] = body.tags
+    expr, params = "cmetadata", {"doc": document, "emb": str(list(vector)), "id": entry_id}
+    for i, (key, val) in enumerate(updates.items()):
+        # jsonb_set path is text[] → asyncpg needs a Python list ([key]), not the
+        # '{key}' array-literal string (which it rejects as non-iterable).
+        expr = f"jsonb_set({expr}, CAST(:p{i} AS text[]), CAST(:v{i} AS jsonb))"
+        params[f"p{i}"] = [key]
+        params[f"v{i}"] = json.dumps(val)
+
+    await db.execute(text(
+        f"UPDATE langchain_pg_embedding SET document = :doc, "
+        f"embedding = CAST(:emb AS vector), cmetadata = {expr} "
+        f"WHERE CAST(uuid AS text) = :id"
+    ), params)
+    return {"status": "updated", "id": entry_id}
+
+
+async def _set_entry_status(db: AsyncSession, entry_id: str, status: str) -> int:
+    res = await db.execute(text(
+        "UPDATE langchain_pg_embedding "
+        "SET cmetadata = jsonb_set(cmetadata, '{status}', CAST(:st AS jsonb)) "
+        "WHERE CAST(uuid AS text) = :id"
+    ), {"st": json.dumps(status), "id": entry_id})
+    return res.rowcount
+
+
+@router.post("/entries/{entry_id}/retire")
+async def retire_entry(entry_id: str, db: AsyncSession = Depends(get_db),
+                       matricule: str = Depends(require_role("Admin"))):
+    if not await _set_entry_status(db, entry_id, "retired"):
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "retired", "id": entry_id}
+
+
+@router.post("/entries/{entry_id}/restore")
+async def restore_entry(entry_id: str, db: AsyncSession = Depends(get_db),
+                        matricule: str = Depends(require_role("Admin"))):
+    if not await _set_entry_status(db, entry_id, "active"):
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "active", "id": entry_id}
+
+
+@router.delete("/entries/{entry_id}")
+async def delete_entry(entry_id: str, db: AsyncSession = Depends(get_db),
+                       matricule: str = Depends(require_role("Admin"))):
+    res = await db.execute(text(
+        "DELETE FROM langchain_pg_embedding WHERE CAST(uuid AS text) = :id"
+    ), {"id": entry_id})
+    if not res.rowcount:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "deleted", "id": entry_id}
+
+
+@router.post("/entries/{entry_id}/resolve-conflict")
+async def resolve_conflict(
+    entry_id: str, body: ConflictResolution,
+    db: AsyncSession = Depends(get_db),
+    matricule: str = Depends(require_role("Admin")),
+):
+    """Accept a conflicting entry (activate it + supersede the old) or reject it (retire)."""
+    row = (await db.execute(text(
+        "SELECT cmetadata FROM langchain_pg_embedding WHERE CAST(uuid AS text) = :id"
+    ), {"id": entry_id})).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    if body.action == "reject":
+        await _set_entry_status(db, entry_id, "retired")
+        return {"status": "rejected", "id": entry_id}
+
+    await _set_entry_status(db, entry_id, "active")
+    conflicts_with = (row[0] or {}).get("conflicts_with")
+    if conflicts_with:
+        await db.execute(text(
+            "UPDATE langchain_pg_embedding "
+            "SET cmetadata = jsonb_set(cmetadata, '{status}', CAST(:st AS jsonb)) "
+            "WHERE cmetadata->>'source_id' = :sid"
+        ), {"st": json.dumps("superseded"), "sid": conflicts_with})
+    return {"status": "accepted", "id": entry_id, "superseded": conflicts_with}
 

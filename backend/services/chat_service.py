@@ -388,9 +388,11 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     # never shadow a real per-user lookup (see cache_policy.py).
                     try:
                         from backend.services.semantic_cache import check_semantic_cache
-                        from backend.services.cache_policy import is_personal_query
+                        from backend.services.cache_policy import is_personal_query, is_escalation_query
                         cached_text = None
-                        if not is_personal_query(content):
+                        # Escalation requests must never be served from cache — a cache hit
+                        # replays the handoff text without actually queueing the user.
+                        if not is_personal_query(content) and not is_escalation_query(content):
                             cached_text = await check_semantic_cache(content, similarity_threshold=0.95)
                         if cached_text:
                             cache_hit = True
@@ -480,6 +482,16 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
                     # --- Evaluate & respond ---
                     span_eval = trace.start_span("EVAL", confidence=ai_result.get("confidence"))
 
+                    # Data-flywheel: remember which HITL entries fed this answer so a
+                    # later CSAT thumb can be attributed back to them (feedback boost).
+                    _hitl_ids = [
+                        d.get("source_id") for d in (ai_result.get("retrieved_docs") or [])
+                        if isinstance(d, dict) and str(d.get("source_id", "")).startswith("hitl-")
+                    ]
+                    if _hitl_ids:
+                        from backend.services import kb_feedback
+                        asyncio.create_task(kb_feedback.record_session_retrieval(session_id, _hitl_ids))
+
                     # Handle graph responses (tokens already streamed)
                     if ai_result.get("source") == "claims_graph":
                         claim_status = ai_result.get("claim_status", "active")
@@ -508,7 +520,14 @@ async def handle_chat_websocket(websocket: WebSocket, session_id: str, sessions_
 
                                 # Transition session state
                                 session["status"] = "handoff_pending"
-                                session["reason"] = f"Graph escalation (confidence: {confidence}%): {content[:80]}"
+                                # Show the agent the user's own phrase, not the
+                                # internal trigger ("Graph escalation (confidence:
+                                # 93%):"). Confidence stays in last_ai_confidence.
+                                _phrase = (content or "").strip()
+                                session["reason"] = (
+                                    (_phrase[:117] + "…") if len(_phrase) > 120
+                                    else (_phrase or "Escalade automatique")
+                                )
                                 session["trigger_message"] = {
                                     "content": ai_result["text"],
                                     "confidence": confidence,

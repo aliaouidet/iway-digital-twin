@@ -1,6 +1,7 @@
-import { Component, OnInit, ChangeDetectionStrategy, signal, DestroyRef, inject, effect } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy, signal, computed, DestroyRef, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -8,7 +9,8 @@ import { auditTime } from 'rxjs/operators';
 import { MetricsService, OpsMetrics } from '../../../core/services/metrics.service';
 import { WebSocketService } from '../../../core/services/websocket.service';
 import { ThemeService } from '../../../core/services/theme.service';
-import { DashboardMetrics } from '../../../shared/models';
+import { ToastService } from '../../../core/services/toast.service';
+import { DashboardMetrics, FeedbackStats } from '../../../shared/models';
 import { ErrorBannerComponent } from '../../../shared/components/error-banner.component';
 
 @Component({
@@ -22,9 +24,15 @@ import { ErrorBannerComponent } from '../../../shared/components/error-banner.co
 export class DashboardComponent implements OnInit {
   metrics = signal<DashboardMetrics | null>(null);
   ops = signal<OpsMetrics | null>(null);
-  isLoading = signal(true);
+  feedback = signal<FeedbackStats | null>(null);
+  isLoading = signal(true);     // first load → skeletons
+  isSyncing = signal(false);    // background WS/manual refresh → subtle pulse
   error = signal<string | null>(null);
   lastUpdated = signal<Date | null>(null);
+
+  // Live controls
+  autoRefresh = signal(true);
+  newEscalations = signal(0);
 
   // Date picker state
   startDate = signal<string>('');
@@ -35,8 +43,42 @@ export class DashboardComponent implements OnInit {
   pieChart: any = {};
   trafficChart: any = {};
   dailyVolumeChart: any = {};
+  funnelChart: any = {};
+  healthGauge: any = {};
+
+  // Rough blended price for gemini-2.5-flash (USD per 1M tokens). Display-only
+  // estimate — adjust here if the model/pricing changes.
+  private readonly COST_PER_1M_TOKENS = 0.30;
+
+  /** Composite 0–100 health score: success + confidence + latency + reliability. */
+  healthScore = computed<number>(() => {
+    const m = this.metrics();
+    if (!m) return 0;
+    const o = this.ops();
+    const success = m.rag_success_rate ?? 0;
+    const confidence = m.avg_confidence ?? 0;
+    const ms = m.avg_response_time_ms ?? 0;
+    const latency = ms <= 5000 ? 100 : ms >= 20000 ? 0 : 100 - ((ms - 5000) / 15000) * 100;
+    const errorOk = 100 - (m.error_rate ?? 0);
+    let score = 0.4 * success + 0.2 * confidence + 0.2 * latency + 0.2 * errorOk;
+    if (o) {
+      const circuitsOpen = Object.values(o.circuits || {}).some(c => c.state === 'open');
+      if (circuitsOpen) score *= 0.6;
+      if (o.persistence?.degraded) score -= 20;
+    }
+    return Math.max(0, Math.min(100, Math.round(score)));
+  });
+
+  /** Estimated LLM spend so far, from durable token counts. */
+  estCost = computed<number>(() => {
+    const o = this.ops();
+    if (!o) return 0;
+    return (o.tokens.total_tokens / 1_000_000) * this.COST_PER_1M_TOKENS;
+  });
 
   private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
+  private toast = inject(ToastService);
 
   private lastHourly: { hour: number; label: string; count: number }[] | null = null;
 
@@ -52,6 +94,9 @@ export class DashboardComponent implements OnInit {
       const m = this.metrics();
       if (m) this.buildCharts(m);
       if (this.lastHourly) this.buildTrafficChart(this.lastHourly);
+      // healthScore() reads metrics()+ops(), so this also rebuilds the gauge
+      // when the Ops snapshot arrives — not only on theme/metrics change.
+      this.buildHealthGauge();
     });
   }
 
@@ -75,21 +120,74 @@ export class DashboardComponent implements OnInit {
   ngOnInit(): void {
     this.loadMetrics();
 
-    // All real-time events trigger a fresh PostgreSQL read.
-    // PostgreSQL is the single source of truth — no partial WS overwrites.
-    const refresh = () => this.loadMetrics();
+    // All real-time events trigger a fresh PostgreSQL read (single source of
+    // truth — no partial WS overwrites). Background refreshes never flash the
+    // skeletons and respect the auto-refresh toggle.
+    const refresh = () => { if (this.autoRefresh()) this.loadMetrics(true); };
 
     // METRIC_UPDATE is pushed by the backend every ~10s forever — auditTime
-    // caps the refresh (2 HTTP GETs + full chart rebuild) to once per 60s.
-    // Rare, meaningful events (escalation/resolution) still refresh instantly.
+    // caps the refresh (HTTP GETs + chart rebuild) to once per 60s.
     this.wsService.getMetricUpdates().pipe(
       auditTime(60_000),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(refresh);
-    this.wsService.getEscalationUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(refresh);
-    this.wsService.getSessionUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(event => {
-      if (event.type === 'SESSION_RESOLVED') refresh();
+
+    // A fresh escalation is rare + meaningful: toast it, bump the unread badge,
+    // and refresh instantly so the queue-depth card stays truthful.
+    this.wsService.getEscalationUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(payload => {
+      this.newEscalations.update(n => n + 1);
+      const who = payload?.user_name || payload?.user_matricule || 'a client';
+      this.toast.show(`New escalation — ${who}`, 'warning');
+      if (this.autoRefresh()) this.loadMetrics(true);
     });
+
+    this.wsService.getSessionUpdates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(event => {
+      if (event.type === 'SESSION_RESOLVED' && this.autoRefresh()) this.loadMetrics(true);
+    });
+  }
+
+  // --- Live controls ---
+
+  toggleAutoRefresh(): void {
+    this.autoRefresh.update(v => !v);
+    if (this.autoRefresh()) this.loadMetrics(true);
+  }
+
+  manualRefresh(): void {
+    this.newEscalations.set(0);
+    this.loadMetrics(true);
+  }
+
+  /** RAG Resolved → filtered Logs; Human Escalated → Tickets; etc. */
+  drillToLogs(outcome: string): void {
+    this.router.navigate(['/admin/logs'], { queryParams: { outcome } });
+  }
+
+  drillToTickets(tab: string): void {
+    this.newEscalations.set(0);
+    this.router.navigate(['/admin/tickets'], { queryParams: { tab } });
+  }
+
+  // --- Period-over-period deltas (from the backend comparison block) ---
+
+  /** Signed % change of a metric vs the previous window. null = no comparison. */
+  deltaPct(key: 'total_requests' | 'rag_success_rate' | 'escalation_rate' | 'avg_confidence' | 'avg_response_time_ms'): number | null {
+    const m = this.metrics();
+    const c = m?.comparison;
+    if (!m || !c) return null;
+    const prev = c[key];
+    const cur = (m as any)[key] as number;
+    if (prev === undefined || prev === null || prev === 0) return cur > 0 ? 100 : null;
+    const raw = Math.round(((cur - prev) / prev) * 100);
+    return Math.max(-999, Math.min(999, raw)); // clamp absurd swings from tiny prior windows
+
+  }
+
+  /** Tailwind class for a delta chip — green when the move is in the good direction. */
+  deltaClass(pct: number | null, higherIsGood: boolean): string {
+    if (pct === null || pct === 0) return 'text-slate-400 dark:text-slate-500';
+    const good = higherIsGood ? pct > 0 : pct < 0;
+    return good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400';
   }
 
   // --- Date Picker ---
@@ -143,8 +241,10 @@ export class DashboardComponent implements OnInit {
 
   // --- Data Loading ---
 
-  loadMetrics(): void {
-    this.isLoading.set(true);
+  loadMetrics(background = false): void {
+    // First load shows skeletons; background (WS/manual) refreshes just pulse.
+    if (background) this.isSyncing.set(true);
+    else this.isLoading.set(true);
     this.error.set(null);
     const s = this.startDate() || undefined;
     const e = this.endDate() || undefined;
@@ -153,14 +253,26 @@ export class DashboardComponent implements OnInit {
       next: (data) => {
         this.metrics.set(data);
         this.buildCharts(data);
+        this.buildHealthGauge();
         this.lastUpdated.set(new Date());
         this.isLoading.set(false);
+        this.isSyncing.set(false);
       },
       error: () => {
         this.error.set('Failed to load dashboard metrics.');
         this.isLoading.set(false);
+        this.isSyncing.set(false);
       }
     });
+
+    // CSAT snapshot (thumbs feedback) — only on a foreground load (initial/manual);
+    // it barely changes, so we skip it on the 60s background + per-escalation refreshes.
+    if (!background) {
+      this.metricsService.getFeedbackStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (data) => this.feedback.set(data),
+        error: () => this.feedback.set(null),
+      });
+    }
 
     // Load hourly traffic (always for today or selected start date)
     const trafficDate = this.activePreset() === 'today' ? this.startDate() : undefined;
@@ -203,6 +315,17 @@ export class DashboardComponent implements OnInit {
 
   // --- Charts ---
 
+  /** Themed ECharts toolbox (save-as-image / data view / zoom) — adds interactivity. */
+  private chartToolbox(features: any): any {
+    const p = this.chartPalette();
+    return {
+      show: true, right: 8, top: -2, itemSize: 14, itemGap: 8,
+      iconStyle: { borderColor: p.axisLabel },
+      emphasis: { iconStyle: { borderColor: '#6366f1' } },
+      feature: features,
+    };
+  }
+
   private buildCharts(data: DashboardMetrics): void {
     const p = this.chartPalette();
     const days = data.time_series.map(t => t.day);
@@ -228,7 +351,19 @@ export class DashboardComponent implements OnInit {
         }
       },
       legend: { data: ['RAG Confidence', 'Avg Response Time'], bottom: 0, icon: 'circle', textStyle: { color: p.legendText } },
-      grid: { left: '3%', right: '5%', bottom: '14%', top: '8%', containLabel: true },
+      // Pin the toolbox into a dedicated top-right header band so the icons clear
+      // the right y-axis name ("Response Time") — the shared chartToolbox() default
+      // (top:-2) collides with axis names on this dual-axis chart.
+      toolbox: {
+        ...this.chartToolbox({
+          dataZoom: { title: { zoom: 'Box zoom', back: 'Reset zoom' }, yAxisIndex: 'none' },
+          restore: { title: 'Reset' },
+          saveAsImage: { title: 'Save PNG', backgroundColor: p.tooltipBg },
+        }),
+        top: 2, right: 4,
+      },
+      dataZoom: [{ type: 'inside', throttle: 50 }],  // scroll / pinch to zoom the timeline
+      grid: { left: '3%', right: '5%', bottom: '14%', top: '20%', containLabel: true },
       xAxis: {
         type: 'category', boundaryGap: false, data: days,
         axisLine: { lineStyle: { color: p.axisLine } },
@@ -271,14 +406,20 @@ export class DashboardComponent implements OnInit {
     };
 
     this.pieChart = {
-      tooltip: { trigger: 'item', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder, textStyle: { color: p.tooltipText } },
+      tooltip: { trigger: 'item', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder, textStyle: { color: p.tooltipText }, formatter: '{b}<br/><b>{c}</b> ({d}%)' },
       legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { color: p.legendText }, icon: 'circle' },
+      toolbox: this.chartToolbox({ saveAsImage: { title: 'Save PNG', backgroundColor: p.tooltipBg } }),
       series: [{
-        name: 'Resolution', type: 'pie', radius: ['55%', '80%'], center: ['50%', '42%'],
+        name: 'Resolution', type: 'pie', radius: ['55%', '80%'], center: ['50%', '45%'],
         avoidLabelOverlap: false,
         itemStyle: { borderRadius: 8, borderColor: p.pieBorder, borderWidth: 4 },
+        // No on-chart label — the tooltip already carries name/value/percent, so a
+        // second label drawn over the donut is redundant. Hover just pops the segment.
         label: { show: false },
-        emphasis: { label: { show: true, fontSize: 22, fontWeight: 'bold', color: p.emphasisText }, itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
+        emphasis: {
+          label: { show: false },
+          itemStyle: { shadowBlur: 14, shadowColor: 'rgba(0,0,0,0.25)' },
+        },
         labelLine: { show: false },
         data: [
           { value: data.rag_resolved, name: 'RAG Resolved', itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: '#34d399'}, {offset: 1, color: '#059669'}]) } },
@@ -299,7 +440,11 @@ export class DashboardComponent implements OnInit {
           return `<div style="font-weight:600">${p.axisValue}</div><b>${p.value}</b> queries`;
         }
       },
-      grid: { left: '3%', right: '4%', bottom: '5%', top: '12%', containLabel: true },
+      toolbox: this.chartToolbox({
+        dataView: { title: 'Data', readOnly: true, backgroundColor: p.tooltipBg, textColor: p.tooltipText, lang: ['Daily volume', 'Close', ''] },
+        saveAsImage: { title: 'Save PNG', backgroundColor: p.tooltipBg },
+      }),
+      grid: { left: '3%', right: '4%', bottom: '5%', top: '18%', containLabel: true },
       xAxis: {
         type: 'category', data: days,
         axisLine: { lineStyle: { color: p.axisLine } },
@@ -322,6 +467,52 @@ export class DashboardComponent implements OnInit {
         data: dailyTraffic
       }]
     };
+
+    // --- Resolution / deflection funnel (nested, decreasing stages) ---
+    const total = data.total_requests;
+    const contained = Math.max(total - data.human_escalated, 0);
+    this.funnelChart = {
+      tooltip: {
+        trigger: 'item', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder,
+        textStyle: { color: p.tooltipText, fontSize: 12 }, formatter: '{b}<br/><b>{c}</b> ({d}%)'
+      },
+      toolbox: this.chartToolbox({ saveAsImage: { title: 'Save PNG', backgroundColor: p.tooltipBg } }),
+      series: [{
+        type: 'funnel', left: '8%', right: '8%', top: 28, bottom: 12,
+        minSize: '34%', maxSize: '100%', sort: 'descending', gap: 3,
+        label: { show: true, position: 'inside', color: '#fff', fontWeight: 'bold', fontSize: 12 },
+        labelLine: { show: false },
+        itemStyle: { borderColor: p.pieBorder, borderWidth: 2 },
+        emphasis: { label: { fontSize: 14 } },
+        data: [
+          { value: total, name: 'Requests', itemStyle: { color: '#64748b' } },
+          { value: contained, name: 'AI-Contained', itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#818cf8' }, { offset: 1, color: '#4f46e5' }]) } },
+          { value: data.rag_resolved, name: 'RAG-Resolved', itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#34d399' }, { offset: 1, color: '#059669' }]) } },
+        ],
+      }],
+    };
+  }
+
+  /** Radial gauge of the composite health score (rebuilt by the theme effect). */
+  private buildHealthGauge(): void {
+    const p = this.chartPalette();
+    const score = this.healthScore();
+    const color = score >= 80 ? '#10b981' : score >= 50 ? '#fbbf24' : '#f43f5e';
+    this.healthGauge = {
+      series: [{
+        type: 'gauge', startAngle: 210, endAngle: -30, min: 0, max: 100,
+        radius: '100%', center: ['50%', '62%'],
+        progress: { show: true, width: 12, roundCap: true, itemStyle: { color } },
+        axisLine: { lineStyle: { width: 12, color: [[1, p.splitLine]] } },
+        pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false },
+        axisLabel: { show: false }, anchor: { show: false }, title: { show: false },
+        detail: {
+          valueAnimation: true, fontSize: 30, fontWeight: 'bolder',
+          offsetCenter: [0, '0%'], formatter: '{value}', color,
+        },
+        data: [{ value: score }],
+      }],
+    };
   }
 
   private buildTrafficChart(hourly: { hour: number; label: string; count: number }[]): void {
@@ -333,7 +524,8 @@ export class DashboardComponent implements OnInit {
 
     this.trafficChart = {
       tooltip: { trigger: 'axis', backgroundColor: p.tooltipBg, borderColor: p.tooltipBorder, textStyle: { color: p.tooltipText, fontSize: 12 } },
-      grid: { left: '3%', right: '4%', bottom: '5%', top: '8%', containLabel: true },
+      toolbox: this.chartToolbox({ saveAsImage: { title: 'Save PNG', backgroundColor: p.tooltipBg } }),
+      grid: { left: '3%', right: '4%', bottom: '5%', top: '18%', containLabel: true },
       xAxis: {
         type: 'category', data: labels,
         axisLine: { lineStyle: { color: p.axisLine } },

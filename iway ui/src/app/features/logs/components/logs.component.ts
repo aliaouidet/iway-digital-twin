@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy, signal, computed, ChangeDetectionStrategy, DestroyRef, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { LogsService } from '../../../core/services/logs.service';
@@ -52,6 +53,18 @@ import { ErrorBannerComponent } from '../../../shared/components/error-banner.co
             <input type="range" [(ngModel)]="minSimilarity" (ngModelChange)="onFilterChange()" min="0" max="100" step="5"
               class="w-full accent-indigo-500 cursor-pointer" />
           </div>
+          <div>
+            <label class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Date Range</label>
+            <div class="flex items-center gap-1.5">
+              <input type="date" [value]="startDate" (change)="onDateChange('start', $event)" [max]="endDate || todayStr()"
+                class="px-2.5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all" />
+              <span class="text-slate-400 text-[10px]">to</span>
+              <input type="date" [value]="endDate" (change)="onDateChange('end', $event)" [max]="todayStr()" [min]="startDate"
+                class="px-2.5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all" />
+              <button *ngIf="startDate || endDate" (click)="clearDates()" title="Clear date range"
+                class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-500 transition-colors cursor-pointer text-xs">✕</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -101,7 +114,7 @@ import { ErrorBannerComponent } from '../../../shared/components/error-banner.co
                 <td class="px-3 py-3.5">
                   <svg class="w-3.5 h-3.5 text-slate-500 transition-transform duration-200" [class.rotate-90]="expandedRow() === i" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
                 </td>
-                <td class="px-5 py-3.5 text-xs text-slate-500 font-mono">{{formatTime(log.timestamp)}}</td>
+                <td class="px-5 py-3.5 text-xs text-slate-500 font-mono whitespace-nowrap" [title]="log.timestamp | date:'medium'">{{log.timestamp | date:'dd MMM, HH:mm:ss'}}</td>
                 <td class="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400">{{log.user_id}}</td>
                 <td class="px-5 py-3.5 text-sm text-slate-700 dark:text-slate-200 max-w-xs truncate">{{log.query}}</td>
                 <td class="px-5 py-3.5">
@@ -143,7 +156,8 @@ import { ErrorBannerComponent } from '../../../shared/components/error-banner.co
                         <div class="flex items-center gap-3 group cursor-pointer" (click)="toggleSpan(sIdx, $event)">
                           <span class="text-[10px] text-slate-600 dark:text-slate-400 w-56 text-right font-mono flex-shrink-0 group-hover:text-indigo-500 transition-colors">{{span.name}}</span>
                           
-                          <div class="flex-1 h-6 bg-slate-200/50 dark:bg-slate-800/30 rounded-md relative overflow-hidden group-hover:bg-slate-200 dark:group-hover:bg-slate-800/80 transition-colors">
+                          <div class="flex-1 h-6 bg-slate-200/50 dark:bg-slate-800/30 rounded-md relative overflow-hidden group-hover:bg-slate-200 dark:group-hover:bg-slate-800/80 transition-colors"
+                            [title]="span.name + ' · ' + span.duration_ms + 'ms · ' + span.status + (span.isBottleneck ? ' · bottleneck' : '')">
                             <div class="h-full rounded-md flex items-center px-2 transition-all duration-500 shadow-sm relative group-hover:brightness-110"
                               [style.width.%]="span.widthPct"
                               [style.margin-left.%]="span.offsetPct"
@@ -260,14 +274,38 @@ export class LogsComponent implements OnInit, OnDestroy {
   selectedOutcome = '';
   minSimilarity = 0;
 
+  // Date-range filter (yyyy-MM-dd, optional)
+  startDate = '';
+  endDate = '';
+
   private filterTimer: any;
   private destroyRef = inject(DestroyRef);
+  private route = inject(ActivatedRoute);
   private static readonly FILTER_KEY = 'iway_logs_filters';
 
   constructor(private logsService: LogsService) {}
 
   ngOnInit(): void {
     this.restoreFilters();
+    // A dashboard drill-down (?outcome=RAG_RESOLVED) wins over the saved filter.
+    const qpOutcome = this.route.snapshot.queryParamMap.get('outcome');
+    if (qpOutcome) this.selectedOutcome = qpOutcome;
+    this.loadLogs();
+  }
+
+  todayStr(): string { return new Date().toISOString().split('T')[0]; }
+
+  onDateChange(type: 'start' | 'end', event: Event): void {
+    const v = (event.target as HTMLInputElement).value;
+    if (type === 'start') this.startDate = v; else this.endDate = v;
+    this.currentPage.set(1);
+    this.loadLogs();
+  }
+
+  clearDates(): void {
+    this.startDate = '';
+    this.endDate = '';
+    this.currentPage.set(1);
     this.loadLogs();
   }
 
@@ -432,6 +470,8 @@ export class LogsComponent implements OnInit, OnDestroy {
       search: this.searchQuery || undefined,
       outcome: (this.selectedOutcome as any) || undefined,
       min_similarity: this.minSimilarity > 0 ? this.minSimilarity : undefined,
+      start_date: this.startDate || undefined,
+      end_date: this.endDate || undefined,
     };
 
     this.logsService.getLogs(filter)
@@ -448,10 +488,6 @@ export class LogsComponent implements OnInit, OnDestroy {
           this.isLoading.set(false);
         }
       });
-  }
-
-  formatTime(ts: string): string {
-    return ts.split(' ').pop() || ts;
   }
 
   formatOutcome(outcome: string): string {

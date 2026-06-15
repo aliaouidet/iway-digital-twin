@@ -8,6 +8,15 @@ export interface TimeSeriesPoint {
   total_tokens?: number;
 }
 
+export interface MetricsComparison {
+  total_requests: number;
+  rag_success_rate: number;
+  escalation_rate: number;
+  avg_confidence: number;
+  avg_response_time_ms: number;
+  window_days: number;
+}
+
 export interface DashboardMetrics {
   total_requests: number;
   rag_resolved: number;
@@ -22,6 +31,14 @@ export interface DashboardMetrics {
   error_rate: number;
   open_tickets: number;
   time_series: TimeSeriesPoint[];
+  comparison?: MetricsComparison | null;
+}
+
+export interface FeedbackStats {
+  total: number;
+  positive: number;
+  negative: number;
+  csat_score: number;
 }
 
 export interface RealtimeMetricUpdate {

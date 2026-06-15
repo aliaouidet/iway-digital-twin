@@ -1,0 +1,9 @@
+{"question": "remboursement des soins dentaires plafond annuel", "expect_source_id": "kb-dentaire"}
+{"question": "combien je touche à la naissance de mon enfant", "expect_source_id": "kb-naissance"}
+{"question": "en combien de temps suis-je remboursé pour mes soins", "expect_source_id": "kb-remboursement-delai"}
+{"question": "je veux ajouter mon fils comme bénéficiaire", "expect_source_id": "kb-beneficiaire"}
+{"question": "déclarer une affection de longue durée", "expect_source_id": "kb-maladie-chronique"}
+{"question": "j'ai perdu ma carte d'assuré comment la refaire", "expect_source_id": "kb-carte"}
+{"question": "plafond dentaire par an et par personne", "expect_source_id": "kb-dentaire"}
+{"question": "prime bébé montant versé", "expect_source_id": "kb-naissance"}
+{"question": "ne pas avancer les frais chez le médecin conventionné", "expect_source_id": "kb-tiers-payant"}

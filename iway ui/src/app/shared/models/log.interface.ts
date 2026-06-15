@@ -20,6 +20,8 @@ export interface LogFilter {
   outcome?: LogOutcome | '';
   user_id?: string;
   min_similarity?: number;
+  start_date?: string;
+  end_date?: string;
   page?: number;
   page_size?: number;
 }

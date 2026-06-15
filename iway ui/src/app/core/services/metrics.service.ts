@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { DashboardMetrics } from '../../shared/models';
+import { DashboardMetrics, FeedbackStats } from '../../shared/models';
 
 @Injectable({ providedIn: 'root' })
 export class MetricsService {
@@ -27,6 +27,11 @@ export class MetricsService {
    *  graph-node latencies, circuit breakers, persistence health. */
   getOpsMetrics(): Observable<OpsMetrics> {
     return this.http.get<OpsMetrics>(`${this.baseUrl}/monitoring/ops`);
+  }
+
+  /** CSAT snapshot from the thumbs-up/down feedback store. */
+  getFeedbackStats(): Observable<FeedbackStats> {
+    return this.http.get<FeedbackStats>(`${this.baseUrl}/feedback/stats`);
   }
 }
 

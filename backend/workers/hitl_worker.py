@@ -35,7 +35,8 @@ settings = get_settings()
     soft_time_limit=45,
 )
 def embed_hitl_feedback(self, session_id: str, question: str, corrected_answer: str,
-                        agent_matricule: str = "system", agent_name: str = "Agent"):
+                        agent_matricule: str = "system", agent_name: str = "Agent",
+                        corrected_from: str = None):
     """
     Celery task: Re-embed agent-validated Q&A pair into the RAG knowledge base.
 
@@ -58,14 +59,19 @@ def embed_hitl_feedback(self, session_id: str, question: str, corrected_answer: 
             f"Q='{question[:50]}...' A='{corrected_answer[:50]}...'"
         )
 
-        # 1. Upsert into knowledge store (uses existing embed + PGVector flow)
+        # 1. Upsert into knowledge store (uses existing embed + PGVector flow).
+        #    origin="correction" marks provenance; corrected_from kept for audit.
         result = add_hitl_knowledge(
             session_id=session_id,
             question=question,
             answer=corrected_answer,
             agent_matricule=agent_matricule,
             agent_name=agent_name,
+            origin="correction",
+            tags=["correction"],
         )
+        if corrected_from:
+            logger.info(f"[HITL] Correction supersedes wrong answer: '{corrected_from[:60]}'")
 
         logger.info(f"[HITL] ✅ Feedback embedded: {result}")
 

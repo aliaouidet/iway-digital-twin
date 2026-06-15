@@ -157,10 +157,15 @@ async def get_pending_sessions(db: AsyncSession) -> List[SessionModel]:
 
 
 async def get_active_sessions(db: AsyncSession) -> List[SessionModel]:
-    """Get all non-resolved sessions."""
+    """Get all live sessions — excludes both RESOLVED and EXPIRED.
+
+    EXPIRED is set by the expire_stale_sessions maintenance task on old
+    unresolved sessions; excluding it here keeps them from re-hydrating into the
+    agent queue on every restart.
+    """
     result = await db.execute(
         select(SessionModel)
-        .where(SessionModel.status != SessionStatus.RESOLVED)
+        .where(SessionModel.status.notin_([SessionStatus.RESOLVED, SessionStatus.EXPIRED]))
         .order_by(SessionModel.created_at.desc())
     )
     return list(result.scalars().all())

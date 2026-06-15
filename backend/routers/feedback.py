@@ -38,6 +38,15 @@ async def submit_feedback(session_id: str, body: dict):
     }
     _feedback_store.append(feedback)
     SESSIONS[session_id]["feedback"] = feedback
+
+    # Data-flywheel: attribute this thumb to the HITL entries retrieved in the
+    # session, so good entries gain boost and bad ones sink + get flagged.
+    try:
+        from backend.services.kb_feedback import record_session_outcome
+        await record_session_outcome(session_id, helpful=(rating == "positive"))
+    except Exception as e:
+        logger.debug(f"KB feedback attribution skipped: {e}")
+
     logger.info(f"📊 CSAT feedback for {session_id}: {rating}")
     return {"status": "received", "rating": rating}
 

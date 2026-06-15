@@ -45,6 +45,12 @@ def is_cacheable_response(ai_result: Optional[dict], cache_hit: bool = False) ->
     tools = ai_result.get("tools_called") or []
     if any(t in _PERSONAL_TOOLS for t in tools) or "personal_lookup" in intent or "claim_action" in intent:
         return False
+    # Escalation/handoff responses must NEVER be cached: replaying the handoff
+    # TEXT on a later cache hit would skip the actual queueing (no ticket, no
+    # agent broadcast) — the user would *think* they reached an agent. See the
+    # escalation intercept in chat_service.handle_chat_websocket.
+    if ai_result.get("claim_status") == "pending_human" or "escalation" in intent:
+        return False
     return True
 
 
@@ -77,3 +83,24 @@ def is_personal_query(text: str) -> bool:
         return True
     from backend.domain.graph.routing import extract_dossier_number
     return extract_dossier_number(text) is not None
+
+
+# Phrases asking to reach a human/agent. Biased toward True like is_personal_query:
+# a false bypass just re-runs the graph (a little latency); a false cache HIT
+# would silently drop the escalation (no ticket / no queue) — a correctness bug.
+_ESCALATION_QUERY_RE = re.compile(
+    r"agent\s+humain|conseiller|"
+    r"\b(un|une|d['e]?\s*)?(agent|humain)\b|"
+    r"parler\s+(?:à|a|avec)\s+(?:un|une|quelqu|qqn|qq1)|"
+    r"(?:talk|speak|chat)\s+to\s+(?:a\s+|an\s+)?(?:human|agent|someone|advisor|person|rep)|"
+    r"human\s+agent|real\s+person|"
+    r"escalat|escalad",
+    re.IGNORECASE,
+)
+
+
+def is_escalation_query(text: str) -> bool:
+    """Whether the user is asking to reach a human — the cache must be bypassed
+    so the request actually escalates (queue + ticket) via the graph each time,
+    never a replayed cached handoff message."""
+    return bool(text) and bool(_ESCALATION_QUERY_RE.search(text))

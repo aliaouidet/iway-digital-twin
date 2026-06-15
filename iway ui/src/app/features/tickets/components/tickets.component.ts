@@ -1,6 +1,7 @@
-import { Component, OnInit, OnDestroy, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, ChangeDetectionStrategy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { TicketService } from '../../../core/services/ticket.service';
 import { LogsService } from '../../../core/services/logs.service';
@@ -78,7 +79,7 @@ import { environment } from '../../../../environments/environment';
                 <div class="flex items-center gap-4 text-xs text-slate-500 mt-2">
                   <span class="flex items-center gap-1">
                     <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    {{ticket.timestamp}}
+                    <span [title]="ticket.timestamp | date:'medium'">{{ticket.timestamp | date:'dd MMM, HH:mm'}}</span>
                   </span>
                   <span>User: {{ticket.user_id}}</span>
                   <span>Confidence: {{ticket.confidence}}%</span>
@@ -186,6 +187,16 @@ export class TicketsComponent implements OnInit, OnDestroy {
   });
 
   private subs: Subscription[] = [];
+  private route = inject(ActivatedRoute);
+
+  // Dashboard drill-down ?tab= values → internal outcome filters.
+  private static readonly TAB_MAP: Record<string, string> = {
+    escalated: 'HUMAN_ESCALATED',
+    fallback: 'AI_FALLBACK',
+    rag: 'RAG_RESOLVED',
+    errors: 'ERROR',
+    all: 'all',
+  };
 
   constructor(
     private logsService: LogsService,
@@ -197,6 +208,10 @@ export class TicketsComponent implements OnInit, OnDestroy {
       const saved = localStorage.getItem('iway_tickets_filter');
       if (saved) this.activeFilter.set(saved);
     } catch { /* ignore */ }
+
+    // A dashboard drill-down (?tab=escalated) wins over the saved filter.
+    const tab = this.route.snapshot.queryParamMap.get('tab');
+    if (tab && TicketsComponent.TAB_MAP[tab]) this.activeFilter.set(TicketsComponent.TAB_MAP[tab]);
 
     this.loadTickets();
 

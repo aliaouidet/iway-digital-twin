@@ -15,6 +15,7 @@ Sync variants are kept for Celery workers and startup code.
 """
 
 import os
+import uuid
 import asyncio
 import logging
 import numpy as np
@@ -222,9 +223,11 @@ class InMemoryVectorStore:
         # Cosine similarity (embeddings are already normalized)
         similarities = self.embeddings @ query_vec
 
-        # Apply HITL boost
+        # Apply HITL boost + exclude non-servable lifecycle states
         for i, entry in enumerate(self.entries):
-            if entry["source_type"] == "hitl_validated":
+            if not _is_servable(entry.get("metadata")):
+                similarities[i] = -1
+            elif entry["source_type"] == "hitl_validated":
                 similarities[i] *= hitl_boost
 
         # Apply source type filter
@@ -399,32 +402,80 @@ def sync_knowledge_from_api(kb_items: List[Dict[str, Any]]) -> Dict[str, int]:
     }
 
 
-def add_hitl_knowledge(session_id: str, question: str, answer: str,
-                       agent_matricule: str, agent_name: str,
-                       tags: List[str] = None) -> Dict[str, Any]:
+# HITL lifecycle statuses that must NOT be served by retrieval. `conflict`
+# entries are agent-captured but contradict an existing answer — they stay out
+# of retrieval until an admin resolves them (never silently both-live).
+_HITL_NONSERVABLE = {"retired", "superseded", "conflict"}
+
+# Over-fetch margin so dropping non-servable (retired/superseded/conflict) HITL
+# entries still leaves k servable results even when several are filtered out.
+_SERVABLE_MARGIN = 20
+
+
+def _new_hitl_source_id(session_id: str) -> str:
+    """Unique id PER captured pair — `hitl-{session}-{rand}`.
+
+    The old `hitl-{session_id}` collided across every pair/correction from one
+    session: the in-memory store overwrote siblings and PGVector entries could
+    never be individually updated or deleted. A per-entry id fixes both.
     """
-    Add a HITL-validated Q&A pair to the knowledge store.
-    Called when an agent resolves a session with 'save_to_knowledge' flag.
-    
-    Stores in PGVector (persistent) if available, otherwise in-memory.
-    """
-    text = f"Question: {question}\nRéponse: {answer}"
-    source_id = f"hitl-{session_id}"
-    
-    metadata = {
+    return f"hitl-{session_id}-{uuid.uuid4().hex[:8]}"
+
+
+def _build_hitl_metadata(*, session_id, question, answer, agent_matricule, agent_name,
+                         tags, source_id, origin, status, conflicts_with=None,
+                         supersedes=None) -> Dict[str, Any]:
+    """Single source of truth for HITL entry metadata (sync + async paths)."""
+    now = datetime.now(timezone.utc).isoformat()
+    meta = {
         "question": question,
         "reponse": answer,
         "session_id": session_id,
         "agent_matricule": agent_matricule,
         "agent_name": agent_name,
-        "validated_at": datetime.now(timezone.utc).isoformat(),
+        "validated_at": now,
+        "created_at": now,
+        "updated_at": now,
         "tags": tags or [],
         "source_type": "hitl_validated",
         "source_id": source_id,
+        "origin": origin,          # resolve | correction | insights
+        "status": status,          # active | conflict | retired | superseded | needs_review
         "embedding_model": settings.EMBEDDING_MODEL,
-        "embedded_at": datetime.now(timezone.utc).isoformat(),
+        "embedded_at": now,
     }
-    
+    if conflicts_with:
+        meta["conflicts_with"] = conflicts_with
+    if supersedes:
+        meta["supersedes"] = supersedes
+    return meta
+
+
+def _is_servable(metadata: Dict[str, Any]) -> bool:
+    """True unless the entry's lifecycle status excludes it from retrieval."""
+    return (metadata or {}).get("status", "active") not in _HITL_NONSERVABLE
+
+
+def add_hitl_knowledge(session_id: str, question: str, answer: str,
+                       agent_matricule: str, agent_name: str,
+                       tags: List[str] = None, *,
+                       origin: str = "resolve", status: str = "active",
+                       conflicts_with: str = None, source_id: str = None) -> Dict[str, Any]:
+    """
+    Add a HITL-validated Q&A pair to the knowledge store.
+    Called when an agent resolves a session with 'save_to_knowledge' flag.
+
+    Stores in PGVector (persistent) if available, otherwise in-memory.
+    """
+    text = f"Question: {question}\nRéponse: {answer}"
+    source_id = source_id or _new_hitl_source_id(session_id)
+
+    metadata = _build_hitl_metadata(
+        session_id=session_id, question=question, answer=answer,
+        agent_matricule=agent_matricule, agent_name=agent_name, tags=tags,
+        source_id=source_id, origin=origin, status=status, conflicts_with=conflicts_with,
+    )
+
     # Try PGVector first
     pgvector = _get_pgvector_store()
     if pgvector is not None:
@@ -470,9 +521,13 @@ def retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
     pgvector = _get_pgvector_store()
     if pgvector is not None:
         try:
-            results = pgvector.similarity_search_with_score(query, k=k)
+            # Over-fetch so dropping retired/superseded/conflict entries still
+            # leaves k servable results.
+            results = pgvector.similarity_search_with_score(query, k=k + _SERVABLE_MARGIN)
             formatted = []
             for doc, score in results:
+                if not _is_servable(doc.metadata):
+                    continue
                 # PGVector returns distance; convert to similarity
                 similarity = 1.0 - score if score <= 1.0 else max(0.0, 1.0 / (1.0 + score))
                 formatted.append({
@@ -482,7 +537,7 @@ def retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
                     "source_type": doc.metadata.get("source_type", "iway_api"),
                     "source_id": doc.metadata.get("source_id", "unknown"),
                 })
-            return formatted
+            return formatted[:k]
         except Exception as e:
             logger.warning(f"⚠️ PGVector search failed, falling back to in-memory: {e}")
     
@@ -499,15 +554,39 @@ def retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
     return results
 
 
+async def _apply_dynamic_hitl_boost(formatted: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
+    """Scale HITL similarities by their feedback-weighted boost, then re-rank.
+
+    Centralizes the boost so it applies to BOTH the PGVector and in-memory paths
+    (the PGVector path previously applied NO HITL boost at all), and makes it
+    feedback-driven instead of a flat constant.
+    """
+    from backend.services import kb_feedback
+    hitl = [f for f in formatted if f.get("source_type") == "hitl_validated" and f.get("source_id")]
+    if hitl:
+        try:
+            # One concurrent batch of Redis reads, not N serial round-trips on the
+            # hot retrieval path.
+            boosts = await asyncio.gather(*(kb_feedback.get_boost_async(f["source_id"]) for f in hitl))
+            for f, b in zip(hitl, boosts):
+                # Clamp: a boosted cosine similarity must stay a valid [0,1] signal
+                # for the downstream reranker / draft-confidence fusion.
+                f["similarity"] = round(min(1.0, f["similarity"] * b), 4)
+        except Exception:
+            pass
+    formatted.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+    return formatted[:k]
+
+
 async def async_retrieve_context(query: str, top_k: int = None) -> List[Dict[str, Any]]:
     """
     Async-safe RAG retrieval — won't block the event loop.
-    
+
     Use this in all FastAPI endpoints and WebSocket handlers.
     The embedding computation runs in a dedicated thread pool.
     """
     k = top_k or settings.RAG_TOP_K
-    
+
     # Try PGVector first (runs sync search in thread pool)
     pgvector = _get_pgvector_store()
     if pgvector is not None:
@@ -515,10 +594,12 @@ async def async_retrieve_context(query: str, top_k: int = None) -> List[Dict[str
             loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(
                 _embed_pool,
-                lambda: pgvector.similarity_search_with_score(query, k=k)
+                lambda: pgvector.similarity_search_with_score(query, k=k + _SERVABLE_MARGIN)
             )
             formatted = []
             for doc, score in results:
+                if not _is_servable(doc.metadata):
+                    continue
                 similarity = 1.0 - score if score <= 1.0 else max(0.0, 1.0 / (1.0 + score))
                 formatted.append({
                     "chunk_text": doc.page_content,
@@ -527,48 +608,44 @@ async def async_retrieve_context(query: str, top_k: int = None) -> List[Dict[str
                     "source_type": doc.metadata.get("source_type", "iway_api"),
                     "source_id": doc.metadata.get("source_id", "unknown"),
                 })
-            return formatted
+            return await _apply_dynamic_hitl_boost(formatted, k)
         except Exception as e:
             logger.warning(f"⚠️ PGVector async search failed: {e}")
-    
+
     # Fallback: in-memory
     if knowledge_store.count == 0:
         return []
 
     query_embedding = await async_embed_text(query)
+    # hitl_boost=1.0 here — the per-entry feedback-weighted boost is applied
+    # centrally by _apply_dynamic_hitl_boost so both stores behave identically.
     results = knowledge_store.search(
         query_embedding=query_embedding,
-        top_k=k,
-        hitl_boost=settings.HITL_BOOST_FACTOR,
+        top_k=k + _SERVABLE_MARGIN,
+        hitl_boost=1.0,
     )
-    return results
+    return await _apply_dynamic_hitl_boost(results, k)
 
 
 async def async_add_hitl_knowledge(
     session_id: str, question: str, answer: str,
     agent_matricule: str, agent_name: str,
-    tags: List[str] = None,
+    tags: List[str] = None, *,
+    origin: str = "resolve", status: str = "active",
+    conflicts_with: str = None, source_id: str = None,
 ) -> Dict[str, Any]:
     """
     Async-safe version of add_hitl_knowledge.
     Embeds and upserts a HITL-validated Q&A pair without blocking the event loop.
     """
     text = f"Question: {question}\nRéponse: {answer}"
-    source_id = f"hitl-{session_id}"
+    source_id = source_id or _new_hitl_source_id(session_id)
 
-    metadata = {
-        "question": question,
-        "reponse": answer,
-        "session_id": session_id,
-        "agent_matricule": agent_matricule,
-        "agent_name": agent_name,
-        "validated_at": datetime.now(timezone.utc).isoformat(),
-        "tags": tags or [],
-        "source_type": "hitl_validated",
-        "source_id": source_id,
-        "embedding_model": settings.EMBEDDING_MODEL,
-        "embedded_at": datetime.now(timezone.utc).isoformat(),
-    }
+    metadata = _build_hitl_metadata(
+        session_id=session_id, question=question, answer=answer,
+        agent_matricule=agent_matricule, agent_name=agent_name, tags=tags,
+        source_id=source_id, origin=origin, status=status, conflicts_with=conflicts_with,
+    )
 
     # Try PGVector first
     pgvector = _get_pgvector_store()
@@ -600,6 +677,63 @@ async def async_add_hitl_knowledge(
         "store_count": knowledge_store.count,
         "store": "in_memory",
     }
+
+
+async def async_add_hitl_with_dedup(
+    session_id: str, question: str, answer: str,
+    agent_matricule: str, agent_name: str,
+    tags: List[str] = None, *, origin: str = "resolve",
+) -> Dict[str, Any]:
+    """Curation-aware HITL insert (dedup + conflict detection).
+
+    Compares the new question against the (few, curated) *servable* HITL entries
+    by question text-ratio — robust, unlike ranking a fresh pair against the whole
+    base KB. On a near-identical question (ratio ≥ KB_DEDUP_QUESTION_RATIO):
+      - same answer (ratio ≥ KB_ANSWER_SIM_THRESHOLD) → **refresh**, skip the
+        insert so the KB doesn't accumulate duplicates.
+      - different answer → insert as **status="conflict"** linked to the existing
+        entry, so an admin resolves it instead of two contradictory answers going
+        live at once.
+      - otherwise → normal active insert.
+    """
+    from difflib import SequenceMatcher
+
+    qn = (question or "").strip().lower()
+    existing_id, existing_answer, best = None, "", 0.0
+    try:
+        from backend.database.connection import async_session_factory
+        from sqlalchemy import text as _sql
+        async with async_session_factory() as _db:
+            rows = (await _db.execute(_sql(
+                "SELECT cmetadata->>'source_id', cmetadata->>'question', cmetadata->>'reponse' "
+                "FROM langchain_pg_embedding "
+                "WHERE cmetadata->>'source_type' = 'hitl_validated' "
+                "AND COALESCE(cmetadata->>'status', 'active') NOT IN ('retired', 'superseded')"
+            ))).fetchall()
+        for sid, sq, sa in rows:
+            r = SequenceMatcher(None, qn, (sq or "").strip().lower()).ratio()
+            if r > best:
+                best, existing_id, existing_answer = r, sid, (sa or "")
+    except Exception as e:
+        logger.debug(f"HITL dedup check skipped: {e}")
+
+    if existing_id and best >= settings.KB_DEDUP_QUESTION_RATIO:
+        ans_ratio = SequenceMatcher(None, (answer or "").strip(), (existing_answer or "").strip()).ratio()
+        if ans_ratio >= settings.KB_ANSWER_SIM_THRESHOLD:
+            logger.info(f"🧠 HITL dedup: near-duplicate of {existing_id} (q={best:.2f}) — refreshed, insert skipped")
+            return {"status": "refreshed", "source_id": existing_id, "duplicate_of": existing_id}
+        logger.info(f"🧠 HITL conflict: new answer contradicts {existing_id} (q={best:.2f}) — flagged for review")
+        res = await async_add_hitl_knowledge(
+            session_id, question, answer, agent_matricule, agent_name,
+            tags=tags, origin=origin, status="conflict", conflicts_with=existing_id,
+        )
+        res["status"] = "conflict"
+        res["conflicts_with"] = existing_id
+        return res
+
+    return await async_add_hitl_knowledge(
+        session_id, question, answer, agent_matricule, agent_name, tags=tags, origin=origin,
+    )
 
 
 def get_knowledge_stats() -> Dict[str, Any]:

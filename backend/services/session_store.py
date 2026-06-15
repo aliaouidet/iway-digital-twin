@@ -16,9 +16,13 @@ It also owns:
 """
 
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
+from backend.config import get_settings
+
 logger = logging.getLogger("I-Way-Twin")
+settings = get_settings()
 
 # The authoritative in-process session map.
 SESSIONS: Dict[str, Dict[str, Any]] = {}
@@ -52,12 +56,21 @@ async def hydrate_all_sessions() -> int:
         return 0
 
     restored = 0
+    # Don't re-hydrate stale unresolved sessions — they'd re-inflate the agent
+    # queue on every restart. The expire_stale_sessions task marks them EXPIRED
+    # nightly; this guard keeps them out even before that task has run.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.STALE_SESSION_DAYS)
+    skipped_stale = 0
     try:
         async with async_session_factory() as db:
             db_sessions = await get_active_sessions(db)
             for db_sess in db_sessions:
                 sid = str(db_sess.id)
                 if sid in SESSIONS:
+                    continue
+
+                if db_sess.created_at and db_sess.created_at < cutoff:
+                    skipped_stale += 1
                     continue
 
                 db_msgs = await get_session_messages(db, sid)
@@ -98,7 +111,10 @@ async def hydrate_all_sessions() -> int:
         logger.warning(f"⚠️ Session hydration failed (non-critical): {e}")
         return restored
 
-    if restored:
+    if restored or skipped_stale:
         pending = sum(1 for s in SESSIONS.values() if s["status"] == "handoff_pending")
-        logger.info(f"💾 Hydrated {restored} session(s) from PostgreSQL ({pending} awaiting an agent)")
+        logger.info(
+            f"💾 Hydrated {restored} session(s) from PostgreSQL ({pending} awaiting an agent)"
+            + (f"; skipped {skipped_stale} stale (> {settings.STALE_SESSION_DAYS}d)" if skipped_stale else "")
+        )
     return restored

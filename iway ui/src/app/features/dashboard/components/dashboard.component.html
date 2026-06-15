@@ -9,6 +9,21 @@
 
     <!-- Date Filter -->
     <div class="flex items-center gap-2 flex-wrap">
+      <!-- Live controls -->
+      <button (click)="toggleAutoRefresh()" [title]="autoRefresh() ? 'Live updates on — click to pause' : 'Paused — click to resume'"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer"
+        [class]="autoRefresh()
+          ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-400'
+          : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'">
+        <span class="w-1.5 h-1.5 rounded-full" [class]="autoRefresh() ? (isSyncing() ? 'bg-emerald-500 animate-ping' : 'bg-emerald-500 animate-pulse') : 'bg-slate-400'"></span>
+        {{ autoRefresh() ? 'Live' : 'Paused' }}
+      </button>
+      <button (click)="manualRefresh()" title="Refresh now"
+        class="relative flex items-center justify-center w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-500 hover:border-indigo-300 dark:hover:border-indigo-500/40 transition-all cursor-pointer">
+        <svg class="w-3.5 h-3.5" [class.animate-spin]="isSyncing()" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+        <span *ngIf="newEscalations() > 0" class="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center animate-pulse">{{newEscalations()}}</span>
+      </button>
+
       <!-- Quick Presets -->
       <div class="flex gap-1 bg-slate-100 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-200 dark:border-slate-700/50">
         <button *ngFor="let p of [['all','All Time'],['today','Today'],['7d','7 Days'],['30d','30 Days']]"
@@ -20,15 +35,23 @@
         </button>
       </div>
 
-      <!-- Date Pickers -->
-      <div class="flex items-center gap-1.5">
-        <input type="date" [value]="startDate()" (change)="onDateChange('start', $event)"
-          [max]="getTodayStr()"
-          class="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 outline-none transition-all" />
-        <span class="text-slate-400 text-[10px]">to</span>
-        <input type="date" [value]="endDate()" (change)="onDateChange('end', $event)"
-          [max]="getTodayStr()"
-          class="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 outline-none transition-all" />
+      <!-- Custom date range (native pickers in one integrated pill) -->
+      <div class="flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-xl border transition-all"
+        [class]="activePreset() === 'custom'
+          ? 'bg-white dark:bg-slate-800 border-indigo-400 dark:border-indigo-500/50 ring-2 ring-indigo-500/20'
+          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'">
+        <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0V11.25A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+        <input type="date" [value]="startDate()" (change)="onDateChange('start', $event)" [max]="endDate() || getTodayStr()"
+          aria-label="From date"
+          class="bg-transparent border-0 p-0 text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:outline-none focus:ring-0 w-[88px]" />
+        <span class="text-slate-300 dark:text-slate-600 text-xs">→</span>
+        <input type="date" [value]="endDate()" (change)="onDateChange('end', $event)" [max]="getTodayStr()" [min]="startDate()"
+          aria-label="To date"
+          class="bg-transparent border-0 p-0 text-[11px] text-slate-700 dark:text-slate-300 font-mono focus:outline-none focus:ring-0 w-[88px]" />
+        <button *ngIf="activePreset() === 'custom' || startDate() || endDate()" (click)="onPreset('all')" title="Clear date range"
+          class="w-5 h-5 flex items-center justify-center rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer flex-shrink-0">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
       </div>
     </div>
   </div>
@@ -52,38 +75,51 @@
     <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md cursor-pointer">
       <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
         <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Total Requests
+        <span class="ml-auto text-slate-300 dark:text-slate-600 cursor-help normal-case" title="Total chat requests processed by the pipeline in the selected window.">&#9432;</span>
       </div>
       <div class="text-2xl font-extrabold text-slate-800 dark:text-white tracking-tight">{{metrics()!.total_requests | number}}</div>
-      <div class="text-[10px] text-slate-400 mt-2 font-medium">Pipeline active</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium flex items-center gap-1.5">
+        <span>Pipeline active</span>
+        <span *ngIf="deltaPct('total_requests') as d" [class]="deltaClass(d, true)" class="font-bold" title="vs previous period">{{ d > 0 ? '▲ +' : '▼ ' }}{{d}}%</span>
+      </div>
     </div>
 
     <!-- RAG Resolved -->
-    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-emerald-300 dark:hover:border-emerald-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
+    <div (click)="drillToLogs('RAG_RESOLVED')" title="View RAG-resolved traces in Logs" class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-emerald-300 dark:hover:border-emerald-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
       <div class="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
       <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider relative">
          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span> RAG Resolved
+         <svg class="ml-auto w-3 h-3 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
       </div>
       <div class="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight relative">{{metrics()!.rag_resolved}}</div>
-      <div class="text-[10px] text-slate-400 mt-2 font-medium relative">{{metrics()!.rag_success_rate}}% success</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium relative flex items-center gap-1.5">
+        <span>{{metrics()!.rag_success_rate}}% success</span>
+        <span *ngIf="deltaPct('rag_success_rate') as d" [class]="deltaClass(d, true)" class="font-bold" title="vs previous period">{{ d > 0 ? '▲ +' : '▼ ' }}{{d}}%</span>
+      </div>
     </div>
 
     <!-- GenAI Fallback -->
-    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-indigo-300 dark:hover:border-indigo-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
+    <div (click)="drillToLogs('AI_FALLBACK')" title="View AI-fallback traces in Logs" class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:border-indigo-300 dark:hover:border-indigo-500/30 hover:shadow-md cursor-pointer group relative overflow-hidden">
       <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
       <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider relative">
          <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.8)]"></span> GenAI Fallback
+         <svg class="ml-auto w-3 h-3 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
       </div>
       <div class="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight relative">{{metrics()!.ai_fallback}}</div>
       <div class="text-[10px] text-slate-400 mt-2 font-medium relative">{{metrics()!.fallback_rate}}% rate</div>
     </div>
 
     <!-- Human Escalated -->
-    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-rose-100 dark:border-rose-800/30 transition-all duration-300 hover:scale-[1.02] hover:border-rose-300 dark:hover:border-rose-500/50 hover:shadow-md cursor-pointer relative overflow-hidden">
+    <div (click)="drillToTickets('escalated')" title="Open the escalation queue" class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-rose-100 dark:border-rose-800/30 transition-all duration-300 hover:scale-[1.02] hover:border-rose-300 dark:hover:border-rose-500/50 hover:shadow-md cursor-pointer group relative overflow-hidden">
       <div class="text-rose-500 dark:text-rose-400 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
          <span class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shadow-[0_0_6px_rgba(244,63,94,0.8)]"></span> Human Required
+         <svg class="ml-auto w-3 h-3 text-rose-300 dark:text-rose-500/60 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
       </div>
       <div class="text-2xl font-extrabold text-rose-600 dark:text-rose-400 tracking-tight">{{metrics()!.human_escalated}}</div>
-      <div class="text-[10px] text-rose-400/80 mt-2 font-medium">{{metrics()!.escalation_rate}}% escalation</div>
+      <div class="text-[10px] text-rose-400/80 mt-2 font-medium flex items-center gap-1.5">
+        <span>{{metrics()!.escalation_rate}}% escalation</span>
+        <span *ngIf="deltaPct('escalation_rate') as d" [class]="deltaClass(d, false)" class="font-bold" title="vs previous period">{{ d > 0 ? '▲ +' : '▼ ' }}{{d}}%</span>
+      </div>
     </div>
 
     <!-- Avg Response Time -->
@@ -91,22 +127,82 @@
       <div class="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
       <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider relative">
          <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Avg Latency
+         <span class="ml-auto text-slate-300 dark:text-slate-600 cursor-help normal-case" title="Average end-to-end response time. Gemini calls dominate this.">&#9432;</span>
       </div>
       <div class="text-2xl font-extrabold tracking-tight relative" [class]="metrics()!.avg_response_time_ms > 15000 ? 'text-rose-500' : metrics()!.avg_response_time_ms > 8000 ? 'text-amber-500' : 'text-emerald-500'">
         {{(metrics()!.avg_response_time_ms / 1000).toFixed(1)}}s
       </div>
-      <div class="text-[10px] text-slate-400 mt-2 font-medium relative">{{metrics()!.avg_response_time_ms | number}}ms avg</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium relative flex items-center gap-1.5">
+        <span>{{metrics()!.avg_response_time_ms | number}}ms avg</span>
+        <span *ngIf="deltaPct('avg_response_time_ms') as d" [class]="deltaClass(d, false)" class="font-bold" title="vs previous period">{{ d > 0 ? '▲ +' : '▼ ' }}{{d}}%</span>
+      </div>
     </div>
 
     <!-- Avg Confidence -->
     <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-5 rounded-2xl border border-slate-200 dark:border-white/5 transition-all duration-300 hover:scale-[1.02] hover:shadow-md cursor-pointer">
       <div class="text-slate-500 font-semibold text-[10px] mb-2 flex items-center gap-1.5 uppercase tracking-wider">
          <span class="w-1.5 h-1.5 rounded-full bg-violet-500"></span> Confidence
+         <span class="ml-auto text-slate-300 dark:text-slate-600 cursor-help normal-case" title="Average RAG confidence score across answered requests.">&#9432;</span>
       </div>
       <div class="text-2xl font-extrabold tracking-tight" [class]="metrics()!.avg_confidence >= 80 ? 'text-emerald-500' : metrics()!.avg_confidence >= 50 ? 'text-amber-500' : 'text-rose-500'">
         {{metrics()!.avg_confidence}}%
       </div>
-      <div class="text-[10px] text-slate-400 mt-2 font-medium">Avg RAG score</div>
+      <div class="text-[10px] text-slate-400 mt-2 font-medium flex items-center gap-1.5">
+        <span>Avg RAG score</span>
+        <span *ngIf="deltaPct('avg_confidence') as d" [class]="deltaClass(d, true)" class="font-bold" title="vs previous period">{{ d > 0 ? '▲ +' : '▼ ' }}{{d}}%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Health + Resolution Funnel + live KPIs -->
+  <div *ngIf="!isLoading() && metrics()" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- System Health gauge -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-violet-500/50 to-transparent"></div>
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">System Health</h3>
+        <span class="text-slate-300 dark:text-slate-600 cursor-help" title="Composite 0–100 score: RAG success rate, confidence, latency, error rate, and circuit/persistence reliability.">&#9432;</span>
+      </div>
+      <div echarts [options]="healthGauge" class="h-[200px]"></div>
+      <p class="text-center -mt-5 text-xs font-bold tracking-wide" [class]="healthScore() >= 80 ? 'text-emerald-500' : healthScore() >= 50 ? 'text-amber-500' : 'text-rose-500'">
+        {{ healthScore() >= 80 ? 'HEALTHY' : healthScore() >= 50 ? 'NEEDS ATTENTION' : 'CRITICAL' }}
+      </p>
+    </div>
+
+    <!-- Resolution / deflection funnel -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight" style="font-family: 'Figtree', sans-serif;">Resolution Funnel</h3>
+        <span class="text-slate-300 dark:text-slate-600 cursor-help" title="How far requests get up the automation funnel: all requests → contained by AI (not escalated) → fully resolved by RAG.">&#9432;</span>
+      </div>
+      <div echarts [options]="funnelChart" class="h-[210px]"></div>
+    </div>
+
+    <!-- Live KPIs: queue depth, CSAT, estimated cost -->
+    <div class="bg-white dark:bg-slate-900/40 shadow-sm dark:shadow-none backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-white/5 flex flex-col justify-center gap-3 relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent"></div>
+      <button (click)="drillToTickets('escalated')" title="Open the agent queue"
+        class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/50 hover:border-rose-300 dark:hover:border-rose-500/40 transition-all cursor-pointer group">
+        <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full" [class]="metrics()!.open_tickets > 0 ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'"></span> Open Tickets
+        </span>
+        <span class="text-xl font-extrabold" [class]="metrics()!.open_tickets > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-800 dark:text-white'">{{metrics()!.open_tickets}}</span>
+      </button>
+      <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/50">
+        <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> CSAT
+          <span class="text-slate-300 dark:text-slate-600 cursor-help" title="Customer satisfaction from chat thumbs up/down ratings.">&#9432;</span>
+        </span>
+        <span class="text-xl font-extrabold text-slate-800 dark:text-white">{{ feedback() ? feedback()!.csat_score + '%' : '—' }}</span>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/50">
+        <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-500"></span> Est. LLM Cost
+          <span class="text-slate-300 dark:text-slate-600 cursor-help" title="Estimated LLM spend so far: total tokens × blended model price. Display-only.">&#9432;</span>
+        </span>
+        <span class="text-xl font-extrabold text-slate-800 dark:text-white">{{ ops() ? '$' + (estCost() | number:'1.2-4') : '—' }}</span>
+      </div>
     </div>
   </div>
 

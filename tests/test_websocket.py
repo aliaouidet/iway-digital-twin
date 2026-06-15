@@ -20,6 +20,9 @@ import asyncio
 import httpx
 import pytest
 
+# Needs the running stack — excluded from the default offline run (use `-m live`).
+pytestmark = pytest.mark.live
+
 BASE = "http://localhost:8000"
 WS_BASE = "ws://localhost:8000"
 

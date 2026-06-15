@@ -182,7 +182,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                 [class]="getStatusBadge(item.status)">{{getStatusLabel(item.status)}}</span>
             </div>
             <p class="text-[10px] truncate mb-1 text-slate-500 dark:text-slate-500">
-              {{item.reason || item.last_message || 'Pas de messages'}}
+              {{cleanReason(item.reason) || item.last_message || 'Pas de messages'}}
             </p>
             <div class="flex items-center justify-between">
               <span class="text-[10px] text-slate-400 dark:text-slate-600">{{item.message_count}} msgs</span>
@@ -517,7 +517,7 @@ type QueueFilter = 'all' | 'urgent' | 'active' | 'mine';
                     <div class="absolute left-[-13px] top-0.5 w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 bg-rose-500 border-rose-400"></div>
                     <div>
                       <span class="text-[10px] font-medium text-rose-700 dark:text-rose-300">Handoff déclenché</span>
-                      <p class="text-[10px] mt-0.5 truncate max-w-[200px] text-slate-400 dark:text-slate-500">{{briefing()!.escalation_reason}}</p>
+                      <p class="text-[10px] mt-0.5 truncate max-w-[200px] text-slate-400 dark:text-slate-500">{{cleanReason(briefing()!.escalation_reason)}}</p>
                     </div>
                   </div>
 
@@ -1369,8 +1369,25 @@ export class AgentWorkspaceComponent implements OnInit, OnDestroy {
     const m = this.waitMinutes(iso);
     if (m < 1) return "à l'instant";
     if (m < 60) return `${m} min`;
-    const h = Math.floor(m / 60), r = m % 60;
-    return r ? `${h}h${r.toString().padStart(2, '0')}` : `${h}h`;
+    const h = Math.floor(m / 60);
+    // Cap the hour format at a day — stale sessions ("475h32") read as garbage.
+    if (h < 24) {
+      const r = m % 60;
+      return r ? `${h}h${r.toString().padStart(2, '0')}` : `${h}h`;
+    }
+    const days = Math.floor(h / 24), rh = h % 24;
+    return rh ? `${days} j ${rh}h` : `${days} j`;
+  }
+
+  /** Strip internal escalation prefixes ("Graph escalation (confidence: 57%): …",
+   *  "Low confidence (40%) on: …") so the agent reads the user's own phrase. Also
+   *  cleans reasons persisted before the backend stopped emitting the prefix. */
+  cleanReason(reason: string | null | undefined): string {
+    if (!reason) return '';
+    return reason
+      .replace(/^Graph escalation \(confidence:\s*\d+%\):\s*/i, '')
+      .replace(/^Low confidence \(\d+%\)\s*on:\s*/i, '')
+      .trim();
   }
 
   isOverdue(item: QueueItem): boolean {

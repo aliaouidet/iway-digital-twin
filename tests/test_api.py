@@ -12,6 +12,9 @@ import os
 import httpx
 import pytest
 
+# Needs the running stack — excluded from the default offline run (use `-m live`).
+pytestmark = pytest.mark.live
+
 BASE = os.environ.get("TEST_API_URL", "http://localhost:8000")
 
 

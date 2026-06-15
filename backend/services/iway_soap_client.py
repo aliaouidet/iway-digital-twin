@@ -294,6 +294,28 @@ def _g(d: Any, *keys) -> Any:
     return None
 
 
+def _fr_date(value: Any) -> Any:
+    """Format an ISO-ish date to French ``DD/MM/YYYY`` for human-facing display.
+
+    Accepts ``'1985-06-12'``, ``'1985-06-12 00:00:00'``, ``'1985-06-12T..'`` or a
+    ``date``/``datetime``. Returns the input unchanged if it can't be parsed —
+    this is a display path and must never raise. The point is that birth dates
+    reach the LLM (pseudonymized) and the UI as ``12/06/1985``, not ISO, so the
+    bot's prose reads naturally in French ("né le 12/06/1985").
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return s
+    date_part = s.split("T")[0].split(" ")[0]
+    try:
+        y, m, d = date_part.split("-")
+        return f"{int(d):02d}/{int(m):02d}/{int(y):04d}"
+    except (ValueError, AttributeError):
+        return value
+
+
 def _map_contrat(dto: Any) -> dict:
     """ContratAdherentWsDto → compact contract dict."""
     d = _to_dict(dto) or {}
@@ -319,7 +341,7 @@ def _map_beneficiaire(dto: Any) -> dict:
         "nom": _g(d, "nom"),
         "prenom": _g(d, "prenom"),
         "nom_complet": _g(d, "nomComplet"),
-        "date_naissance": _g(d, "dateNaiss") or (str(_g(d, "dateNaissance")) if _g(d, "dateNaissance") else None),
+        "date_naissance": _fr_date(_g(d, "dateNaiss") or _g(d, "dateNaissance")),
         "age": _g(d, "age"),
         "lien": _ref_label(_g(d, "codeCntr")),
         "matricule": _g(d, "matricule"),

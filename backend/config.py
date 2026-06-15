@@ -74,7 +74,11 @@ class Settings(BaseSettings):
 
     # --- HITL ---
     CONFIDENCE_THRESHOLD: float = 0.30
-    HITL_BOOST_FACTOR: float = 1.15
+    HITL_BOOST_FACTOR: float = 1.15        # base multiplier; L3 scales it by helpfulness
+    HITL_BOOST_MAX: float = 1.40           # ceiling for the feedback-weighted boost
+    KB_DEDUP_THRESHOLD: float = 0.92       # (reserved) vector-similarity dedup threshold
+    KB_DEDUP_QUESTION_RATIO: float = 0.85  # question text-ratio above which two HITL pairs are "the same question"
+    KB_ANSWER_SIM_THRESHOLD: float = 0.85  # answer text ratio above which it's a refresh (else a conflict)
     SESSION_TTL_HOURS: int = 24
 
     # --- Semantic cache ---
@@ -82,6 +86,7 @@ class Settings(BaseSettings):
 
     # --- Retention ---
     CHECKPOINT_RETENTION_DAYS: int = 30  # LangGraph checkpoints of resolved sessions older than this are pruned
+    STALE_SESSION_DAYS: int = 3          # unresolved sessions older than this are auto-expired (drop out of the agent queue)
 
     # --- Celery ---
     CELERY_BROKER_URL: str = "redis://:iway_redis_secret@localhost:6379/1"

@@ -97,4 +97,11 @@ celery_app.conf.beat_schedule = {
         "schedule": 24 * 3600,
         "options": {"queue": "default"},
     },
+    # Nightly: unresolved sessions older than STALE_SESSION_DAYS are expired so
+    # the agent queue + dashboard open_tickets don't accumulate abandoned cases.
+    "expire-stale-sessions": {
+        "task": "backend.workers.maintenance_worker.expire_stale_sessions",
+        "schedule": 24 * 3600,
+        "options": {"queue": "default"},
+    },
 }

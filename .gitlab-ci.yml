@@ -1,6 +1,6 @@
-# Minimal CI for the on-LAN GitLab (debian-7-px) — runs the offline test
-# suites + the frontend build on every push, so regressions are caught before
-# they reach the deploy VM.
+# CI for the on-LAN GitLab (debian-7-px). Runs the offline backend suite (with
+# coverage), the headless frontend unit tests, and the production frontend build
+# on every push. E2E (Playwright) is a manual stage — it needs the running stack.
 
 stages:
   - test
@@ -18,10 +18,27 @@ backend-tests:
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
     - pip install torch --index-url https://download.pytorch.org/whl/cpu
-    - pip install -r requirements.txt pytest
+    - pip install -r requirements.txt -r requirements-dev.txt
   script:
-    # Offline suites only — live-env scripts (test_api.py etc.) need the stack.
-    - python -m pytest tests/test_invariants.py tests/test_iway_soap_client.py -v
+    # pytest.ini excludes `live` + `e2e` by default → offline unit + integration only.
+    - python -m pytest --cov=backend --cov-report=term --cov-report=xml
+  coverage: '/^TOTAL\s+\d+\s+\d+\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+frontend-tests:
+  stage: test
+  image: node:20-bookworm-slim
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*
+    - export CHROME_BIN=$(which chromium)
+    - cd "iway ui"
+    - npm ci
+  script:
+    - npx ng test --no-watch --browsers=ChromeHeadlessNoSandbox --code-coverage
 
 frontend-build:
   stage: test
@@ -30,3 +47,15 @@ frontend-build:
     - cd "iway ui"
     - npm ci
     - npx ng build --configuration production
+
+e2e:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.48.0-jammy
+  when: manual          # needs the mock-mode Docker stack reachable at E2E_BASE_URL
+  allow_failure: true
+  variables:
+    E2E_BASE_URL: "http://localhost:4200"
+  script:
+    - cd e2e
+    - npm install
+    - npx playwright test

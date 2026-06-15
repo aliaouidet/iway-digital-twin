@@ -15,6 +15,7 @@ When USE_LOCAL_LLM=true (Ollama, on-premise) the shield is inactive: local
 inference is the sanctioned path for data-sensitive deployments.
 """
 
+import re
 import logging
 from typing import Any, Tuple
 
@@ -22,6 +23,22 @@ from backend.config import get_settings
 
 logger = logging.getLogger("I-Way-Twin")
 settings = get_settings()
+
+# Long digit runs (8+) are CIN / numéro de police / matricule — never amounts
+# (≤4 digits), years, or DD/MM/YYYY dates (split by slashes). Safe to redact.
+_ID_RUN_RE = re.compile(r"\b\d{8,}\b")
+
+
+def redact_identifiers(text: str) -> str:
+    """Deterministic last-line scrub of free text headed for the SHARED KB.
+
+    A defence-in-depth complement to the LLM's `personal` classification: even
+    if a `general`/`procedural` answer slips through with a raw CIN or policy
+    number, this strips it before it is embedded and served to other users.
+    """
+    if not text:
+        return text
+    return _ID_RUN_RE.sub("[identifiant masqué]", text)
 
 # Record keys whose string values identify a person. Compared case-insensitively
 # with ``-`` normalized to ``_``. Structural fields (ids, montants, statuts) are

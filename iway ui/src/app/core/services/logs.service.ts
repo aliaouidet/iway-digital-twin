@@ -20,6 +20,8 @@ export class LogsService {
     if (filter.min_similarity !== undefined) {
       params = params.set('min_similarity', (filter.min_similarity / 100).toString());
     }
+    if (filter.start_date) params = params.set('start_date', filter.start_date);
+    if (filter.end_date) params = params.set('end_date', filter.end_date);
 
     return this.http.get<PaginatedLogs>(`${this.baseUrl}/logs`, { params });
   }

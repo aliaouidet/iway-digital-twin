@@ -1,10 +1,12 @@
 import { Component, OnInit, signal, ChangeDetectionStrategy, DestroyRef, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { InsightsService } from '../../../core/services/insights.service';
+import { ToastService } from '../../../core/services/toast.service';
 import { InsightsData, InsightSuggestion } from '../../../shared/models';
 import { ErrorBannerComponent } from '../../../shared/components/error-banner.component';
 import { environment } from '../../../../environments/environment';
@@ -34,7 +36,7 @@ interface CsatStats {
 @Component({
   selector: 'app-insights',
   standalone: true,
-  imports: [CommonModule, NgxEchartsDirective, ErrorBannerComponent],
+  imports: [CommonModule, FormsModule, NgxEchartsDirective, ErrorBannerComponent],
   providers: [provideEchartsCore({ echarts })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -132,6 +134,32 @@ interface CsatStats {
                   {{s.trend_pct}}%
                 </span>
               </div>
+
+              <!-- Create KB article from this gap -->
+              <div class="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700/50">
+                <div *ngIf="kbDone().has(s.category)" class="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  Article added to the knowledge base
+                </div>
+                <ng-container *ngIf="!kbDone().has(s.category)">
+                  <button *ngIf="kbOpenFor() !== s.category" (click)="openKb(s)"
+                    class="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 inline-flex items-center gap-1 cursor-pointer">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                    Create KB article
+                  </button>
+                  <div *ngIf="kbOpenFor() === s.category" class="space-y-2">
+                    <input [(ngModel)]="kbQuestion" placeholder="Question"
+                      class="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40" />
+                    <textarea [(ngModel)]="kbAnswer" rows="3" placeholder="Canonical answer (professional French)"
+                      class="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"></textarea>
+                    <div class="flex gap-2">
+                      <button (click)="saveKb(s)" [disabled]="kbSaving() || !kbQuestion.trim() || !kbAnswer.trim()"
+                        class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer">{{ kbSaving() ? 'Saving…' : 'Save article' }}</button>
+                      <button (click)="closeKb()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer">Cancel</button>
+                    </div>
+                  </div>
+                </ng-container>
+              </div>
             </div>
           </div>
         </div>
@@ -212,12 +240,55 @@ export class InsightsComponent implements OnInit {
   confidenceChart: any = {};
   fallbackChart: any = {};
 
+  // "Create KB article" inline form state (one open at a time, keyed by category).
+  kbOpenFor = signal<string | null>(null);
+  kbQuestion = '';
+  kbAnswer = '';
+  kbSaving = signal(false);
+  kbDone = signal<Set<string>>(new Set());
+
   private destroyRef = inject(DestroyRef);
+  private toast = inject(ToastService);
 
   constructor(
     private insightsService: InsightsService,
     private http: HttpClient,
   ) {}
+
+  // --- Create KB article from a knowledge-gap cluster ---
+
+  openKb(s: InsightSuggestion): void {
+    this.kbOpenFor.set(s.category);
+    this.kbQuestion = s.sample_queries?.[0] || s.category;
+    this.kbAnswer = '';
+  }
+
+  closeKb(): void {
+    this.kbOpenFor.set(null);
+    this.kbQuestion = '';
+    this.kbAnswer = '';
+  }
+
+  saveKb(s: InsightSuggestion): void {
+    if (!this.kbQuestion.trim() || !this.kbAnswer.trim() || this.kbSaving()) return;
+    this.kbSaving.set(true);
+    this.http.post(`${environment.apiUrl}/api/v1/knowledge/articles`, {
+      question: this.kbQuestion.trim(),
+      answer: this.kbAnswer.trim(),
+      topic: s.category,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.kbDone.update(set => new Set(set).add(s.category));
+        this.toast.show('Knowledge article saved to the RAG base.', 'success');
+        this.kbSaving.set(false);
+        this.closeKb();
+      },
+      error: () => {
+        this.toast.show('Could not save the article. Try again.', 'error');
+        this.kbSaving.set(false);
+      },
+    });
+  }
 
   ngOnInit(): void {
     this.loadData();
